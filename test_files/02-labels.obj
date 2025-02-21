@@ -1,0 +1,63 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+13
+5020
+5260
+1240
+1021
+2407
+94BF
+14A1
+1402
+0DF9
+3201
+F025
+????
+0003
+
+.SYMBOL
+ADDR | EXT | LABEL
+3002 |   0 | LOOP
+300B |   0 | SUM
+300C |   0 | N
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL | INDEX
+LOOP  |   217
+SUM   |   443
+N     |   483
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ; Instead of writing PC offsets below, we write labels\n
+   1 | ???? | \n
+   2 | ???? | ; Compute 0+1+2+...+N\n
+   3 | ???? | \n
+   4 | ???? | ; R0 holds i\n
+   5 | ???? | ; R1 holds sum\n
+   6 | ???? | \n
+   7 | ???? | .orig x3000 ; user programs in LC-3 start at address 0x3000\n
+   8 | 3000 | and r0, r0, 0  ; i = 0\n
+   9 | 3001 | and r1, r1, 0  ; sum = 0\n
+  10 | ???? | \n
+  11 | ???? | LOOP\n
+  12 | 3002 | add r1, r1, r0 ; sum = sum + i\n
+  13 | 3003 | add r0, r0, 1  ; i++\n
+  14 | 3004 | ld r2, N       ; r2 = N\n
+  15 | 3005 | not r2, r2\n
+  16 | 3006 | add r2, r2, 1  ; r2 = -N\n
+  17 | 3007 | add r2, r0, r2 ; set cc for i-N\n
+  18 | 3008 | brnz LOOP      ; repeat if i <= N\n
+  19 | ???? | \n
+  20 | 3009 | st r1, SUM     ; store sum in memory\n
+  21 | 300A | halt\n
+  22 | 300B | SUM .blkw 1    ; reserve 1 word for sum\n
+  23 | 300C | N .fill 3      ; N=3\n
+  24 | ???? | .end\n
+  25 | ???? | 
+====================

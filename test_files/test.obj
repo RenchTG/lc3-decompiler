@@ -1,0 +1,39 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+8
+1021
+1021
+1021
+1021
+1021
+1021
+F025
+0005
+
+.SYMBOL
+ADDR | EXT | LABEL
+3007 |   0 | TEST
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL | INDEX
+TEST  |   101
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | .orig x3000\n
+   1 | 3000 | add r0, r0, 1\n
+   2 | 3001 | add r0, r0, 1\n
+   3 | 3002 | add r0, r0, 1\n
+   4 | 3003 | add r0, r0, 1\n
+   5 | 3004 | add r0, r0, 1\n
+   6 | 3005 | add r0, r0, 1\n
+   7 | 3006 | halt\n
+   8 | ???? | TEST\n
+   9 | 3007 | .fill 5\n
+  10 | ???? | .end
+====================

@@ -1,0 +1,53 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+4
+2002
+4000
+F025
+4000
+4000
+1
+C1C0
+
+.SYMBOL
+ADDR | EXT | LABEL
+3003 |   0 | ADD_FUNC_ADDR
+4000 |   0 | ADD_FUNC
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL         | INDEX
+ADD_FUNC_ADDR |   155
+ADD_FUNC      |   284
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ; This code is written by me\n
+   1 | ???? | .orig x3000\n
+   2 | 3000 | ld r0, ADD_FUNC_ADDR\n
+   3 | ???? | \n
+   4 | ???? | ; How do I pass arguments???\n
+   5 | 3001 | jsrr r0 ; Call ADD_FUNC()\n
+   6 | ???? | ; How do I get return value???\n
+   7 | ???? | \n
+   8 | 3002 | halt\n
+   9 | 3003 | ADD_FUNC_ADDR .fill ADD_FUNC\n
+  10 | ???? | .end\n
+  11 | ???? | \n
+  12 | ???? | \n
+  13 | ???? | ; Written by my cousin Bubba from North GA.\n
+  14 | ???? | ; The API is: int add(int a, int b);\n
+  15 | ???? | .orig x4000\n
+  16 | ???? | ADD_FUNC\n
+  17 | ???? |     ; How does Bubba get arguments???\n
+  18 | ???? |     ; How does Bubba send back the returned value???\n
+  19 | 4000 |     ret\n
+  20 | ???? | .end\n
+  21 | ???? | \n
+  22 | ???? | ; ...stay tuned for the answers to these questions!\n
+  23 | ???? | 
+====================
