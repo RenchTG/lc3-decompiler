@@ -1,6 +1,6 @@
 use std::fs;
 use std::collections::HashMap;
-use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, IOffset};
+use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset};
 
 fn gen_sections(content: &str) -> (Vec<&str>, HashMap<u16, &str>) {
     let sections: Vec<&str> = content.split("\n\n").collect();
@@ -47,30 +47,55 @@ fn disassemble(text: Vec<&str>, symbols: HashMap<u16, &str>) -> (HashMap<u16, St
 }
 
 fn identify_code_data(disassembly: HashMap<u16, Stmt>, origs: Vec<u16>) {
-    let mut call_list = origs.clone();
-    let mut function_list = Vec::new();
+    let mut call_list: Vec<u16> = origs.clone();
+    let mut function_list: Vec<u16> = Vec::new();
+    let mut work_list: Vec<u16> = Vec::new();
 
     while !call_list.is_empty() {
-        let addr = call_list.pop().unwrap();
+        let mut addr = call_list.pop().unwrap();
         function_list.push(addr);
 
         loop {
             let stmt = &disassembly[&addr];
 
             match &stmt.nucleus {
-                StmtKind::Instr(AsmInstr::JMP(reg)) => {
+                StmtKind::Instr(AsmInstr::JMP(_reg)) => {
                     // no good way to handle this for now
                 },
-                StmtKind::Instr(AsmInstr::BR(cc, pcoffset9)) => {
-                    let offset = IOffset::get(*pcoffset9);
+                StmtKind::Instr(AsmInstr::BR(_cc, pcoffset9)) => {
+                    let value = match pcoffset9 {
+                        PCOffset::Offset(offset) => Some(offset.get()),
+                        PCOffset::Label(_) => None,
+                    }.unwrap();
+                    work_list.push((addr as i16 + value) as u16);
+                },
+                StmtKind::Instr(AsmInstr::JSRR(_reg)) => {
+                    // no good way to handle this for now
+                },
+                StmtKind::Instr(AsmInstr::JSR(pcoffset11)) => {
+                    let value = match pcoffset11 {
+                        PCOffset::Offset(offset) => Some(offset.get()),
+                        PCOffset::Label(_) => None,
+                    }.unwrap();
+                    call_list.push((addr as i16 + value) as u16);
+                },
+                StmtKind::Instr(AsmInstr::RET) => {
+                    if work_list.is_empty() {
+                        break;
+                    }
+                },
+                StmtKind::Instr(AsmInstr::HALT) => {
+                    break;
                 },
                 StmtKind::Directive(_) => {
                     break;
                 },
                 _ => {
-                    break;
+                    // er
                 }
             }
+
+            addr += 1;
         }
     }
 }
