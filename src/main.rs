@@ -1,6 +1,6 @@
 use std::fs;
 use std::collections::HashMap;
-use lc3_ensemble::ast::{asm::{disassemble_line, Stmt}, Label};
+use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, IOffset};
 
 fn gen_sections(content: &str) -> (Vec<&str>, HashMap<u16, &str>) {
     let sections: Vec<&str> = content.split("\n\n").collect();
@@ -18,13 +18,17 @@ fn gen_sections(content: &str) -> (Vec<&str>, HashMap<u16, &str>) {
     (text, symbols)
 }
 
-fn disassemble(text: Vec<&str>, symbols: HashMap<u16, &str>) -> HashMap<u16, Stmt> {
+fn disassemble(text: Vec<&str>, symbols: HashMap<u16, &str>) -> (HashMap<u16, Stmt>, Vec<u16>) {
     let mut disassembled = HashMap::new();
+    let mut origs = Vec::new();
     let mut index = 0;
+
     while index < text.len() {
         let start_addr = u16::from_str_radix(text[index], 16).unwrap();
+        origs.push(start_addr);
         let length_of_section = text[index+1].parse::<u16>().unwrap();
         index += 2;
+
         for i in 0..length_of_section {
             let instr = u16::from_str_radix(text[index], 16).unwrap_or(0);
             let mut statement = disassemble_line(instr);
@@ -39,9 +43,38 @@ fn disassemble(text: Vec<&str>, symbols: HashMap<u16, &str>) -> HashMap<u16, Stm
             index += 1;
         }
     }
-    disassembled
+    (disassembled, origs)
 }
 
+fn identify_code_data(disassembly: HashMap<u16, Stmt>, origs: Vec<u16>) {
+    let mut call_list = origs.clone();
+    let mut function_list = Vec::new();
+
+    while !call_list.is_empty() {
+        let addr = call_list.pop().unwrap();
+        function_list.push(addr);
+
+        loop {
+            let stmt = &disassembly[&addr];
+
+            match &stmt.nucleus {
+                StmtKind::Instr(AsmInstr::JMP(reg)) => {
+                    // no good way to handle this for now
+                },
+                StmtKind::Instr(AsmInstr::BR(cc, pcoffset9)) => {
+                    let offset = IOffset::get(*pcoffset9);
+                },
+                StmtKind::Directive(_) => {
+                    break;
+                },
+                _ => {
+                    break;
+                }
+            }
+        }
+    }
+}
+    
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
@@ -54,14 +87,14 @@ fn main() {
 
     let (text, symbols) = gen_sections(&input_obj);
 
-    let disass: HashMap<u16, Stmt> = disassemble(text, symbols);
+    let (disassembly, origs) = disassemble(text, symbols);
 
-    let mut sorted_entries: Vec<_> = disass.into_iter().collect();
+    let mut sorted_entries: Vec<_> = disassembly.clone().into_iter().collect();
     sorted_entries.sort_by_key(|&(key, _)| key);
 
     for (addr, stmt) in sorted_entries {
         println!("{:04X}: {}", addr, stmt);
     }
 
-    //identify_code_data(disassembled, symbols);
+    identify_code_data(disassembly, origs);
 }
