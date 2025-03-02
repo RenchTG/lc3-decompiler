@@ -1,0 +1,104 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+19
+5020
+5260
+1261
+54A0
+14A3
+260B
+96FF
+16E1
+5920
+1843
+0204
+1242
+14A2
+1021
+0FF6
+B002
+F025
+0014
+4000
+4000
+1
+????
+
+.SYMBOL
+ADDR | EXT | LABEL
+3005 |   0 | WHILEBEGIN
+300F |   0 | WHILEEND
+3011 |   0 | N
+3012 |   0 | RESULT
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL      | INDEX
+WHILEBEGIN |   749
+WHILEEND   |  1030
+N          |  1167
+RESULT     |  1178
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ;;=============================================================\n
+   1 | ???? | ;; CS 2110 - Spring 2025\n
+   2 | ???? | ;; Homework 4 - Integer Square Root\n
+   3 | ???? | ;;=============================================================\n
+   4 | ???? | ;; Name: Philip Dobranowski\n
+   5 | ???? | ;;=============================================================\n
+   6 | ???? | \n
+   7 | ???? | \n
+   8 | ???? | ;; Suggested Pseudocode (see PDF for explanation)\n
+   9 | ???? | ;;\n
+  10 | ???? | ;;  int L = 0;\n
+  11 | ???? | ;;  int a = 1;\n
+  12 | ???? | ;;  int d = 3;\n
+  13 | ???? | ;;\n
+  14 | ???? | ;;  while (a <= N) {\n
+  15 | ???? | ;;      a = a + d;  // Compute the next perfect square\n
+  16 | ???? | ;;      d = d + 2;  // Increase the difference between squares\n
+  17 | ???? | ;;      L = L + 1;  // Increment L\n
+  18 | ???? | ;;  }\n
+  19 | ???? | ;;\n
+  20 | ???? | ;;  mem[mem[RESULT]] = L;\n
+  21 | ???? |     \n
+  22 | ???? | .orig x3000\n
+  23 | 3000 |     AND R0, R0, 0 ; L = 0\n
+  24 | 3001 |     AND R1, R1, 0 ; a = 0\n
+  25 | 3002 |     ADD R1, R1, 1 ; a = 1\n
+  26 | 3003 |     AND R2, R2, 0 ; d = 0\n
+  27 | 3004 |     ADD R2, R2, 3 ; d = 3\n
+  28 | ???? |     \n
+  29 | ???? |     WHILEBEGIN\n
+  30 | 3005 |     LD R3, N       ; get N\n
+  31 | 3006 |     NOT R3, R3\n
+  32 | 3007 |     ADD R3, R3, 1  ; -N\n
+  33 | 3008 |     AND R4, R4, 0\n
+  34 | 3009 |     ADD R4, R1, R3 ; a - N\n
+  35 | 300A |     BRP WHILEEND   ; jump out if a > N\n
+  36 | 300B |     ADD R1, R1, R2 ; a = a + d\n
+  37 | 300C |     ADD R2, R2, 2  ; d = d + 2\n
+  38 | 300D |     ADD R0, R0, 1  ; L = L + 1\n
+  39 | 300E |     BR WHILEBEGIN\n
+  40 | ???? |     \n
+  41 | ???? |     WHILEEND\n
+  42 | 300F |     STI R0, RESULT\n
+  43 | ???? |     \n
+  44 | 3010 |     HALT\n
+  45 | ???? | \n
+  46 | ???? | ;; Do not rename or remove any existing labels\n
+  47 | ???? | ;; You may change the value of N for debugging\n
+  48 | 3011 | N .fill 20\n
+  49 | 3012 | RESULT .fill x4000\n
+  50 | ???? | .end\n
+  51 | ???? | \n
+  52 | ???? | .orig x4000\n
+  53 | 4000 |     .blkw 1\n
+  54 | ???? | .end\n
+  55 | ???? | 
+====================

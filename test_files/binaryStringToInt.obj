@@ -1,0 +1,150 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+33
+5020
+221C
+1201
+6240
+0402
+1021
+0FFA
+5260
+54A0
+56E0
+16C0
+96FF
+16E1
+5920
+1902
+1903
+060B
+1241
+260B
+16C2
+66C0
+280A
+993F
+1921
+16C4
+1243
+14A1
+0FED
+B202
+F025
+5000
+4000
+0030
+4000
+1
+????
+5000
+6
+0031
+0031
+0030
+0030
+0031
+0000
+
+.SYMBOL
+ADDR | EXT | LABEL
+3001 |   0 | WHILESTART
+3007 |   0 | WHILEEND
+3009 |   0 | FORIN
+301C |   0 | FOROUT
+301E |   0 | BINARYSTRING
+301F |   0 | RESULTADDR
+3020 |   0 | ASCIIDIG
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL        | INDEX
+WHILESTART   |   649
+WHILEEND     |   846
+FORIN        |   933
+FOROUT       |  1478
+BINARYSTRING |  1617
+RESULTADDR   |  1642
+ASCIIDIG     |  1665
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ;;=============================================================\n
+   1 | ???? | ;; CS 2110 - Spring 2025\n
+   2 | ???? | ;; Homework 4 - Binary String to Int \n
+   3 | ???? | ;;=============================================================\n
+   4 | ???? | ;; Name: Philip Dobranowski\n
+   5 | ???? | ;;=============================================================\n
+   6 | ???? | \n
+   7 | ???? | .orig x3000\n
+   8 | ???? | ;; Suggested Pseudocode (see PDF for explanation)\n
+   9 | ???? | ;;\n
+  10 | ???? | ;; int length = 0;\n
+  11 | ???? | ;;  while (BINARYSTRING[length] != 0) {\n
+  12 | ???? | ;;      length++;\n
+  13 | ???? | ;;  }\n
+  14 | ???? | ;;  int result = 0;\n
+  15 | ???? | ;;  for (int i = 0; i < length; i++) {\n
+  16 | ???? | ;;      result = result << 1;\n
+  17 | ???? | ;;      result += BINARYSTRING[i] - 48;\n
+  18 | ???? | ;;  }\n
+  19 | ???? | ;;  mem[mem[RESULTADDR]] = result;\n
+  20 | ???? | \n
+  21 | 3000 |     AND R0, R0, 0       ; length = 0\n
+  22 | ???? |     \n
+  23 | ???? |     WHILESTART\n
+  24 | 3001 |     LD R1, BINARYSTRING ; start of binstring\n
+  25 | 3002 |     ADD R1, R0, R1\n
+  26 | 3003 |     LDR R1, R1, 0       ; get binstring[length]\n
+  27 | 3004 |     BRZ WHILEEND\n
+  28 | 3005 |     ADD R0, R0, 1       ; length++\n
+  29 | 3006 |     BR WHILESTART\n
+  30 | ???? |     WHILEEND\n
+  31 | ???? |     \n
+  32 | 3007 |     AND R1, R1, 0       ; result = 0\n
+  33 | 3008 |     AND R2, R2, 0       ; i = 0\n
+  34 | ???? |     FORIN\n
+  35 | 3009 |     AND R3, R3, 0\n
+  36 | 300A |     ADD R3, R3, R0\n
+  37 | 300B |     NOT R3, R3\n
+  38 | 300C |     ADD R3, R3, 1       ; -length\n
+  39 | 300D |     AND R4, R4, 0\n
+  40 | 300E |     ADD R4, R4, R2\n
+  41 | 300F |     ADD R4, R4, R3      ; i - length\n
+  42 | 3010 |     BRZP FOROUT\n
+  43 | 3011 |     ADD R1, R1, R1      ; result = result << 1\n
+  44 | 3012 |     LD R3, BINARYSTRING\n
+  45 | 3013 |     ADD R3, R3, R2      ; binstring+i\n
+  46 | 3014 |     LDR R3, R3, 0       ; binstring[i]\n
+  47 | 3015 |     LD R4, ASCIIDIG     ; 48\n
+  48 | 3016 |     NOT R4, R4\n
+  49 | 3017 |     ADD R4, R4, 1       ; -48\n
+  50 | 3018 |     ADD R3, R3, R4      ; binstring[i] - 48\n
+  51 | 3019 |     ADD R1, R1, R3      ; result = result + binstring[i] - 48\n
+  52 | 301A |     ADD R2, R2, 1\n
+  53 | 301B |     BR FORIN\n
+  54 | ???? |     FOROUT\n
+  55 | 301C |     STI R1, RESULTADDR\n
+  56 | 301D |     HALT\n
+  57 | ???? | \n
+  58 | ???? | ;; Do not rename or remove any existing labels\n
+  59 | ???? | ;; You may change the value of LENGTH for debugging\n
+  60 | 301E | BINARYSTRING .fill x5000\n
+  61 | 301F | RESULTADDR .fill x4000\n
+  62 | 3020 | ASCIIDIG .fill 48\n
+  63 | ???? | .end\n
+  64 | ???? | \n
+  65 | ???? | .orig x4000\n
+  66 | 4000 |     .blkw 1\n
+  67 | ???? | .end\n
+  68 | ???? | \n
+  69 | ???? | ;; You may change the value of the string for debugging\n
+  70 | ???? | .orig x5000\n
+  71 | 5000 |     .stringz \"11001\"\n
+  72 | ???? | .end\n
+  73 | ???? | 
+====================

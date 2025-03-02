@@ -1,0 +1,120 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+26
+2016
+4800
+5260
+1247
+127E
+1401
+56E0
+16C2
+280F
+9B3F
+1B61
+1AC5
+0A01
+F025
+6A40
+0404
+7A80
+1261
+14A1
+0FFA
+5B60
+7A80
+C0C0
+0100
+FE00
+0000
+
+.SYMBOL
+ADDR | EXT | LABEL
+3002 |   0 | FUNC_ADDR
+300E |   0 | WHILEBEGIN
+3014 |   0 | WHILEEND
+3017 |   0 | INC
+3018 |   0 | STOP_ADDR
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL      | INDEX
+FUNC_ADDR  |   889
+WHILEBEGIN |  1299
+WHILEEND   |  1521
+INC        |  1645
+STOP_ADDR  |  1665
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ;;=============================================================\n
+   1 | ???? | ;; CS 2110 - Spring 2025\n
+   2 | ???? | ;; Homework 4 - Leapfrog\n
+   3 | ???? | ;;=============================================================\n
+   4 | ???? | ;; Name: Philip Dobranowski\n
+   5 | ???? | ;;=============================================================\n
+   6 | ???? | \n
+   7 | ???? | .orig x3000\n
+   8 | ???? | ;; Suggested Pseudocode (see PDF for explanation)\n
+   9 | ???? | ;;\n
+  10 | ???? | ;; inc = x0100\n
+  11 | ???? | ;; func_addr = starting address of function\n
+  12 | ???? | ;; copy_addr = func_addr + inc\n
+  13 | ???? | ;; start_copy = copy_addr\n
+  14 | ???? | ;; stop_addr = xFE00  \n
+  15 | ???? | ;; if (start_copy - stop_addr == 0):\n
+  16 | ???? | ;;      HALT\n
+  17 | ???? | ;; curr = mem[func_addr]\n
+  18 | ???? | ;; while (curr != 0) {\n
+  19 | ???? | ;;      curr = mem[func_addr]\n
+  20 | ???? | ;;      mem[copy_addr] = curr\n
+  21 | ???? | ;;      func_addr++\n
+  22 | ???? | ;;      copy_addr++\n
+  23 | ???? | ;; }\n
+  24 | ???? | ;; mem[copy_addr] = 0\n
+  25 | ???? | ;; PC = start_copy\n
+  26 | ???? | ;; .fill 0\n
+  27 | ???? | \n
+  28 | ???? | ;; YOUR CODE HERE\n
+  29 | ???? | \n
+  30 | 3000 |     LD R0, INC        ; R0 = inc = x0100\n
+  31 | ???? |     \n
+  32 | ???? |     ; In order to fetch current PC use a small func call and grab r7-2\n
+  33 | 3001 |     JSR FUNC_ADDR\n
+  34 | ???? |     FUNC_ADDR\n
+  35 | 3002 |     AND R1, R1, 0\n
+  36 | 3003 |     ADD R1, R1, R7\n
+  37 | 3004 |     ADD R1, R1, -2    ; R1 = FUNC_ADDR\n
+  38 | ???? |     \n
+  39 | 3005 |     ADD R2, R0, R1    ; R2 = copy_addr = func_addr + inc\n
+  40 | 3006 |     AND R3, R3, 0\n
+  41 | 3007 |     ADD R3, R3, R2    ; R3 = start_copy = copy_addr\n
+  42 | 3008 |     LD R4, STOP_ADDR  ; R4 = stop_addr = xFe00\n
+  43 | 3009 |     NOT R5, R4\n
+  44 | 300A |     ADD R5, R5, 1     ; R5 = -stop_addr\n
+  45 | 300B |     ADD R5, R3, R5    ; R5 = start_copy - stop_addr\n
+  46 | 300C |     BRNP WHILEBEGIN\n
+  47 | 300D |     HALT\n
+  48 | ???? |     \n
+  49 | ???? |     WHILEBEGIN\n
+  50 | 300E |     LDR R5, R1, 0     ; R5 = mem[func_addr]\n
+  51 | 300F |     BRZ WHILEEND\n
+  52 | 3010 |     STR R5, R2, 0     ; mem[copy_addr] = mem[func_addr]\n
+  53 | 3011 |     ADD R1, R1, 1     ; func_addr++\n
+  54 | 3012 |     ADD R2, R2, 1     ; copy_addr++\n
+  55 | 3013 |     BR WHILEBEGIN\n
+  56 | ???? |     WHILEEND\n
+  57 | ???? |     \n
+  58 | 3014 |     AND R5, R5, 0\n
+  59 | 3015 |     STR R5, R2, 0     ; mem[copy_addr] = 0\n
+  60 | 3016 |     JMP R3            ; PC = start_copy\n
+  61 | ???? |     \n
+  62 | 3017 |     INC .fill x0100\n
+  63 | 3018 |     STOP_ADDR .fill xFE00\n
+  64 | 3019 |     .fill 0\n
+  65 | ???? | .end
+====================

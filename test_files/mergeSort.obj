@@ -1,0 +1,870 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+280
+2C12
+2C11
+200D
+220D
+54A0
+260C
+1DBF
+7780
+1DBF
+7580
+1DBF
+7380
+1DBF
+7180
+4805
+F025
+4000
+5000
+0004
+F000
+1DBF
+1DBF
+7F80
+1DBF
+7B80
+1DBF
+5B60
+1BA0
+1DBF
+7180
+1DBF
+7380
+1DBF
+7580
+1DBF
+7780
+1DBF
+7980
+6146
+6347
+927F
+1261
+1001
+1021
+0636
+1DBF
+5020
+1022
+7180
+1DBF
+6146
+6347
+1001
+7180
+483C
+6180
+1DA3
+1DBF
+7180
+1DBF
+6346
+7380
+1DBF
+6345
+7380
+1DBF
+6344
+7380
+4FCF
+1DA5
+1DBF
+6347
+7380
+1DBF
+7180
+1DBF
+6345
+7380
+1DBF
+6344
+7380
+4FC2
+1DA5
+1DBF
+6347
+7380
+1DBF
+7180
+1DBF
+6346
+7380
+1DBF
+6345
+7380
+1DBF
+6344
+7380
+4841
+1DA6
+6980
+1DA1
+6780
+1DA1
+6580
+1DA1
+6380
+1DA1
+6180
+1DA1
+1DA1
+6B80
+1DA1
+6F80
+1DA1
+C1C0
+1DBF
+1DBF
+7F80
+1DBF
+7B80
+1DBF
+5B60
+1BA0
+1DBF
+7180
+1DBF
+7380
+1DBF
+7580
+1DBF
+7780
+1DBF
+7980
+6145
+040B
+5020
+6344
+6545
+94BF
+14A1
+1442
+0804
+5260
+1242
+1021
+0FF7
+7143
+6980
+1DA1
+6780
+1DA1
+6580
+1DA1
+6380
+1DA1
+6180
+1DA1
+1DA1
+6B80
+1DA1
+6F80
+1DA1
+C1C0
+1DBF
+1DBF
+7F80
+1DBF
+7B80
+1DBF
+5B60
+1BA0
+1DBF
+7180
+1DBF
+7380
+1DBF
+7580
+1DBF
+7780
+1DBF
+7980
+6146
+6347
+6546
+6747
+96FF
+16E1
+1603
+0621
+6748
+96FF
+16E1
+1643
+061C
+6744
+16C0
+66C0
+6944
+1901
+6900
+993F
+1921
+16C4
+0209
+6745
+16C2
+6944
+1900
+6900
+78C0
+14A1
+1021
+0FE3
+6745
+16C2
+6944
+1901
+6900
+78C0
+14A1
+1261
+0FDA
+6747
+96FF
+16E1
+1603
+0609
+6745
+16C2
+6944
+1900
+6900
+78C0
+14A1
+1021
+0FF2
+6748
+96FF
+16E1
+1643
+0609
+6745
+16C2
+6944
+1901
+6900
+78C0
+14A1
+1261
+0FF2
+6146
+6348
+927F
+1261
+1201
+0608
+6545
+1480
+6480
+6344
+1240
+7440
+1021
+0FF3
+6980
+1DA1
+6780
+1DA1
+6580
+1DA1
+6380
+1DA1
+6180
+1DA1
+1DA1
+6B80
+1DA1
+6F80
+1DA1
+C1C0
+4000
+4
+0005
+0002
+0003
+0001
+5000
+4
+0005
+0002
+0003
+0001
+
+.SYMBOL
+ADDR | EXT | LABEL
+3010 |   0 | ARRAY
+3011 |   0 | BUF
+3012 |   0 | LENGTH
+3013 |   0 | STACK_PTR
+3014 |   0 | MERGESORT
+3063 |   0 | EARLYRET
+3073 |   0 | DIVIDE
+3089 |   0 | WHILEBEGIN
+3092 |   0 | RETIF
+3092 |   0 | WHILEEND
+30A3 |   0 | MERGE
+30B8 |   0 | WHILE1BEGIN
+30D5 |   0 | ELSE
+30DE |   0 | WHILE2BEGIN
+30EC |   0 | WHILE3BEGIN
+30FA |   0 | WHILE3END
+30FB |   0 | FORBEGIN
+3108 |   0 | FOREND
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL       | INDEX
+ARRAY       |  1053
+BUF         |  1077
+LENGTH      |  1101
+STACK_PTR   |  1121
+MERGESORT   |  1145
+EARLYRET    |  4293
+DIVIDE      |  5135
+WHILEBEGIN  |  6043
+WHILEEND    |  6306
+RETIF       |  6324
+MERGE       |  7589
+WHILE1BEGIN |  8475
+ELSE        |  9482
+WHILE2BEGIN |  9772
+WHILE3BEGIN | 10246
+WHILE3END   | 10718
+FORBEGIN    | 10845
+FOREND      | 11260
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ;;=============================================================\n
+   1 | ???? | ;; CS 2110 - Spring 2025\n
+   2 | ???? | ;; Homework 4 - Merge Sort\n
+   3 | ???? | ;;=============================================================\n
+   4 | ???? | ;; Name: Philip Dobranowski\n
+   5 | ???? | ;;=============================================================\n
+   6 | ???? | \n
+   7 | ???? | ;;  In this file, you must implement the \'MERGESORT\', \'MERGE\', and \'DIVIDE\' subroutines.\n
+   8 | ???? |     \n
+   9 | ???? | .orig x3000\n
+  10 | ???? |     ;; You do not need to write anything here\n
+  11 | 3000 |     LD R6, STACK_PTR\n
+  12 | ???? | \n
+  13 | ???? |     ;; Pushes arguments (starting address of array to sort,\n
+  14 | ???? |     ;;                   starting address of buffer,\n
+  15 | ???? |     ;;                   lower index to sort,\n
+  16 | ???? |     ;;                   upper index to sort)\n
+  17 | ???? |     ;;=============================================================\n
+  18 | ???? | \n
+  19 | 3001 |     LD R6, STACK_PTR\n
+  20 | 3002 |     LD R0, ARRAY\n
+  21 | 3003 |     LD R1, BUF\n
+  22 | 3004 |     AND R2, R2, 0   ; start = 0\n
+  23 | 3005 |     LD R3, LENGTH   ; end = length\n
+  24 | ???? |     \n
+  25 | 3006 |     ADD R6, R6, -1  ; push args\n
+  26 | 3007 |     STR R3, R6, 0\n
+  27 | 3008 |     ADD R6, R6, -1\n
+  28 | 3009 |     STR R2, R6, 0\n
+  29 | 300A |     ADD R6, R6, -1\n
+  30 | 300B |     STR R1, R6, 0\n
+  31 | 300C |     ADD R6, R6, -1\n
+  32 | 300D |     STR R0, R6, 0\n
+  33 | ???? |     \n
+  34 | 300E |     JSR MERGESORT\n
+  35 | ???? |     \n
+  36 | 300F |     HALT\n
+  37 | ???? |     \n
+  38 | 3010 |     ARRAY   .fill x4000\n
+  39 | 3011 |     BUF     .fill x5000\n
+  40 | 3012 |     LENGTH  .fill 4\n
+  41 | 3013 |     STACK_PTR .fill xF000\n
+  42 | ???? | \n
+  43 | ???? | \n
+  44 | ???? | MERGESORT   ;; Do not change this label! Treat this as like the name of the function in a function header\n
+  45 | ???? |             ;; Code your implementation for the MERGESORT subroutine here!\n
+  46 | ???? | \n
+  47 | ???? | ;; MERGESORT PSEUDOCODE: Pseudocode (see PDF for explanation and examples)   \n
+  48 | ???? | ;; MERGESORT (int[] arr, int[] buf, int start, int end) {\n
+  49 | ???? | ;;      if (start >= end - 1) {\n
+  50 | ???? | ;;        return;\n
+  51 | ???? | ;;      }\n
+  52 | ???? | ;;      mid = DIVIDE(start + end, 2)\n
+  53 | ???? | ;;      MERGESORT(arr, buf, start, mid)\n
+  54 | ???? | ;;      MERGESORT(arr, buf, mid, end)\n
+  55 | ???? | ;;      MERGE(arr, buf, start, mid, end)\n
+  56 | ???? | ;;  }\n
+  57 | ???? |     \n
+  58 | ???? |     ; Start of Callee buildup\n
+  59 | ???? |     ; Return value\n
+  60 | 3014 |     ADD R6, R6, -1\n
+  61 | ???? |     ; Return address\n
+  62 | 3015 |     ADD R6, R6, -1\n
+  63 | 3016 |     STR R7, R6, 0\n
+  64 | ???? |     ; Old frame pointer\n
+  65 | 3017 |     ADD R6, R6, -1\n
+  66 | 3018 |     STR R5, R6, 0\n
+  67 | ???? |     ; Space for local variables\n
+  68 | 3019 |     ADD R6, R6, -1\n
+  69 | ???? |     ; Set frame pointer to stack pointer\n
+  70 | 301A |     AND R5, R5, 0\n
+  71 | 301B |     ADD R5, R6, 0\n
+  72 | ???? |     ; Save general purpose registers\n
+  73 | 301C |     ADD R6, R6, -1\n
+  74 | 301D |     STR R0, R6, 0\n
+  75 | 301E |     ADD R6, R6, -1\n
+  76 | 301F |     STR R1, R6, 0\n
+  77 | 3020 |     ADD R6, R6, -1\n
+  78 | 3021 |     STR R2, R6, 0\n
+  79 | 3022 |     ADD R6, R6, -1\n
+  80 | 3023 |     STR R3, R6, 0\n
+  81 | 3024 |     ADD R6, R6, -1\n
+  82 | 3025 |     STR R4, R6, 0\n
+  83 | ???? |     ; End of Callee buildup\n
+  84 | ???? |     \n
+  85 | ???? |     ; Actual MERGESORT code\n
+  86 | ???? |     \n
+  87 | ???? |     ; if check\n
+  88 | 3026 |     LDR R0, R5, 6   ; R0 = start\n
+  89 | 3027 |     LDR R1, R5, 7   ; R1 = end\n
+  90 | 3028 |     NOT R1, R1\n
+  91 | 3029 |     ADD R1, R1, 1   ; R1 = -end\n
+  92 | 302A |     ADD R0, R0, R1  ; R0 = start-end\n
+  93 | 302B |     ADD R0, R0, 1   ; R0 = start-end+1\n
+  94 | 302C |     BRZP EARLYRET\n
+  95 | ???? |     \n
+  96 | ???? |     ; put 2 as param\n
+  97 | 302D |     ADD R6, R6, -1\n
+  98 | 302E |     AND R0, R0, 0\n
+  99 | 302F |     ADD R0, R0, 2\n
+ 100 | 3030 |     STR R0, R6, 0\n
+ 101 | ???? |     ; put start+end as param\n
+ 102 | 3031 |     ADD R6, R6, -1\n
+ 103 | 3032 |     LDR R0, R5, 6    ; R0 = start\n
+ 104 | 3033 |     LDR R1, R5, 7    ; R1 = end\n
+ 105 | 3034 |     ADD R0, R0, R1  ; R0 = start+end\n
+ 106 | 3035 |     STR R0, R6, 0\n
+ 107 | ???? |     ; call divide and fetch ret value\n
+ 108 | 3036 |     JSR DIVIDE\n
+ 109 | 3037 |     LDR R0, R6, 0   ; R0 = mid = return value of DIVIDE\n
+ 110 | 3038 |     ADD R6, R6, 3   ; fix stack after call\n
+ 111 | ???? |     \n
+ 112 | ???? |     ; put mid as param\n
+ 113 | 3039 |     ADD R6, R6, -1\n
+ 114 | 303A |     STR R0, R6, 0\n
+ 115 | ???? |     ; put start as param\n
+ 116 | 303B |     ADD R6, R6, -1\n
+ 117 | 303C |     LDR R1, R5, 6   ; R1 = start\n
+ 118 | 303D |     STR R1, R6, 0\n
+ 119 | ???? |     ; put buf as param\n
+ 120 | 303E |     ADD R6, R6, -1\n
+ 121 | 303F |     LDR R1, R5, 5   ; R1 = buf\n
+ 122 | 3040 |     STR R1, R6, 0\n
+ 123 | ???? |     ; put arr as param\n
+ 124 | 3041 |     ADD R6, R6, -1\n
+ 125 | 3042 |     LDR R1, R5, 4   ; R1 = arr\n
+ 126 | 3043 |     STR R1, R6, 0\n
+ 127 | ???? |     ; call mergesort\n
+ 128 | 3044 |     JSR MERGESORT\n
+ 129 | 3045 |     ADD R6, R6, 5   ; fix stack after call\n
+ 130 | ???? |     \n
+ 131 | ???? |     ; put end as param\n
+ 132 | 3046 |     ADD R6, R6, -1\n
+ 133 | 3047 |     LDR R1, R5, 7   ; R1 = end\n
+ 134 | 3048 |     STR R1, R6, 0\n
+ 135 | ???? |     ; put mid as param\n
+ 136 | 3049 |     ADD R6, R6, -1\n
+ 137 | 304A |     STR R0, R6, 0\n
+ 138 | ???? |     ; put buf as param\n
+ 139 | 304B |     ADD R6, R6, -1\n
+ 140 | 304C |     LDR R1, R5, 5   ; R1 = buf\n
+ 141 | 304D |     STR R1, R6, 0\n
+ 142 | ???? |     ; put arr as param\n
+ 143 | 304E |     ADD R6, R6, -1\n
+ 144 | 304F |     LDR R1, R5, 4   ; R1 = arr\n
+ 145 | 3050 |     STR R1, R6, 0\n
+ 146 | ???? |     ; call mergesort\n
+ 147 | 3051 |     JSR MERGESORT\n
+ 148 | 3052 |     ADD R6, R6, 5   ; fix stack after call\n
+ 149 | ???? |     \n
+ 150 | ???? |     ; put end as param\n
+ 151 | 3053 |     ADD R6, R6, -1\n
+ 152 | 3054 |     LDR R1, R5, 7   ; R1 = end\n
+ 153 | 3055 |     STR R1, R6, 0\n
+ 154 | ???? |     ; put mid as param\n
+ 155 | 3056 |     ADD R6, R6, -1\n
+ 156 | 3057 |     STR R0, R6, 0\n
+ 157 | ???? |     ; put start as param\n
+ 158 | 3058 |     ADD R6, R6, -1\n
+ 159 | 3059 |     LDR R1, R5, 6   ; R1 = start\n
+ 160 | 305A |     STR R1, R6, 0\n
+ 161 | ???? |     ; put buf as param\n
+ 162 | 305B |     ADD R6, R6, -1\n
+ 163 | 305C |     LDR R1, R5, 5   ; R1 = buf\n
+ 164 | 305D |     STR R1, R6, 0\n
+ 165 | ???? |     ; put arr as param\n
+ 166 | 305E |     ADD R6, R6, -1\n
+ 167 | 305F |     LDR R1, R5, 4   ; R1 = arr\n
+ 168 | 3060 |     STR R1, R6, 0\n
+ 169 | ???? |     ; call merge\n
+ 170 | 3061 |     JSR MERGE\n
+ 171 | 3062 |     ADD R6, R6, 6   ; fix stack after call\n
+ 172 | ???? |     \n
+ 173 | ???? |     EARLYRET\n
+ 174 | ???? |     \n
+ 175 | ???? |     ; Start of Callee Teardown\n
+ 176 | ???? |     ; No return value\n
+ 177 | ???? |     ; Restore general purpose registers\n
+ 178 | 3063 |     LDR R4, R6, 0\n
+ 179 | 3064 |     ADD R6, R6, 1\n
+ 180 | 3065 |     LDR R3, R6, 0\n
+ 181 | 3066 |     ADD R6, R6, 1\n
+ 182 | 3067 |     LDR R2, R6, 0\n
+ 183 | 3068 |     ADD R6, R6, 1\n
+ 184 | 3069 |     LDR R1, R6, 0\n
+ 185 | 306A |     ADD R6, R6, 1\n
+ 186 | 306B |     LDR R0, R6, 0\n
+ 187 | 306C |     ADD R6, R6, 1\n
+ 188 | ???? |     ; Pop local variables\n
+ 189 | 306D |     ADD R6, R6, 1\n
+ 190 | ???? |     ; Pop and restore frame pointer\n
+ 191 | 306E |     LDR R5, R6, 0\n
+ 192 | 306F |     ADD R6, R6, 1\n
+ 193 | ???? |     ; Pop and restore return address\n
+ 194 | 3070 |     LDR R7, R6, 0\n
+ 195 | 3071 |     ADD R6, R6, 1\n
+ 196 | ???? |     ; End of Callee Teardown\n
+ 197 | ???? |     \n
+ 198 | 3072 |     RET\n
+ 199 | ???? |     \n
+ 200 | ???? | ;;  DIVIDE Pseudocode (see PDF for explanation and examples)   \n
+ 201 | ???? | ;;\n
+ 202 | ???? | ;;  DIVIDE(int a, int b)\n
+ 203 | ???? | ;;  {\n
+ 204 | ???? | ;;      if (b == 0)\n
+ 205 | ???? | ;;      {\n
+ 206 | ???? | ;;          return 0;\n
+ 207 | ???? | ;;      }\n
+ 208 | ???? | ;;    \n
+ 209 | ???? | ;;      int quotient = 0;\n
+ 210 | ???? | ;;      while (a >= b)\n
+ 211 | ???? | ;;      {\n
+ 212 | ???? | ;;          a -= b;\n
+ 213 | ???? | ;;          quotient++;\n
+ 214 | ???? | ;;      }\n
+ 215 | ???? | ;;    \n
+ 216 | ???? | ;;      return quotient;\n
+ 217 | ???? | ;;  }\n
+ 218 | ???? | \n
+ 219 | ???? | DIVIDE  ;; Do not change this label! Treat this this like the name of the function in a function header\n
+ 220 | ???? |         ;; Code your implementation for the DIVIDE subroutine here!\n
+ 221 | ???? |     \n
+ 222 | ???? |     ; Start of Callee buildup\n
+ 223 | ???? |     ; Return value\n
+ 224 | 3073 |     ADD R6, R6, -1\n
+ 225 | ???? |     ; Return address\n
+ 226 | 3074 |     ADD R6, R6, -1\n
+ 227 | 3075 |     STR R7, R6, 0\n
+ 228 | ???? |     ; Old frame pointer\n
+ 229 | 3076 |     ADD R6, R6, -1\n
+ 230 | 3077 |     STR R5, R6, 0\n
+ 231 | ???? |     ; Space for local variables\n
+ 232 | 3078 |     ADD R6, R6, -1\n
+ 233 | ???? |     ; Set frame pointer to stack pointer\n
+ 234 | 3079 |     AND R5, R5, 0\n
+ 235 | 307A |     ADD R5, R6, 0\n
+ 236 | ???? |     ; Save general purpose registers\n
+ 237 | 307B |     ADD R6, R6, -1\n
+ 238 | 307C |     STR R0, R6, 0\n
+ 239 | 307D |     ADD R6, R6, -1\n
+ 240 | 307E |     STR R1, R6, 0\n
+ 241 | 307F |     ADD R6, R6, -1\n
+ 242 | 3080 |     STR R2, R6, 0\n
+ 243 | 3081 |     ADD R6, R6, -1\n
+ 244 | 3082 |     STR R3, R6, 0\n
+ 245 | 3083 |     ADD R6, R6, -1\n
+ 246 | 3084 |     STR R4, R6, 0\n
+ 247 | ???? |     ; End of Callee buildup\n
+ 248 | ???? |     \n
+ 249 | ???? |     ; Actual DIVIDE code\n
+ 250 | 3085 |     LDR R0, R5, 5  ; R0 = b\n
+ 251 | 3086 |     BRZ RETIF\n
+ 252 | ???? |     \n
+ 253 | 3087 |     AND R0, R0, 0  ; R0 = quotient = 0\n
+ 254 | ???? |     ; while check\n
+ 255 | 3088 |     LDR R1, R5, 4  ; R1 = a\n
+ 256 | ???? |     WHILEBEGIN\n
+ 257 | 3089 |     LDR R2, R5, 5  ; R2 = b\n
+ 258 | 308A |     NOT R2, R2\n
+ 259 | 308B |     ADD R2, R2, 1  ; R2 = -b\n
+ 260 | 308C |     ADD R2, R1, R2 ; R2 = a-b\n
+ 261 | 308D |     BRN WHILEEND\n
+ 262 | ???? |     \n
+ 263 | ???? |     ; while body\n
+ 264 | 308E |     AND R1, R1, 0\n
+ 265 | 308F |     ADD R1, R1, R2 ; R1 = a = a-b\n
+ 266 | 3090 |     ADD R0, R0, 1  ; quotient++\n
+ 267 | 3091 |     BR WHILEBEGIN\n
+ 268 | ???? |     \n
+ 269 | ???? |     WHILEEND\n
+ 270 | ???? |     \n
+ 271 | ???? |     RETIF\n
+ 272 | ???? |     \n
+ 273 | ???? |     ; Start of Callee Teardown\n
+ 274 | ???? |     ; Save return value\n
+ 275 | 3092 |     STR R0, R5, 3\n
+ 276 | ???? |     ; Restore general purpose registers\n
+ 277 | 3093 |     LDR R4, R6, 0\n
+ 278 | 3094 |     ADD R6, R6, 1\n
+ 279 | 3095 |     LDR R3, R6, 0\n
+ 280 | 3096 |     ADD R6, R6, 1\n
+ 281 | 3097 |     LDR R2, R6, 0\n
+ 282 | 3098 |     ADD R6, R6, 1\n
+ 283 | 3099 |     LDR R1, R6, 0\n
+ 284 | 309A |     ADD R6, R6, 1\n
+ 285 | 309B |     LDR R0, R6, 0\n
+ 286 | 309C |     ADD R6, R6, 1\n
+ 287 | ???? |     ; Pop local variables\n
+ 288 | 309D |     ADD R6, R6, 1\n
+ 289 | ???? |     ; Pop and restore frame pointer\n
+ 290 | 309E |     LDR R5, R6, 0\n
+ 291 | 309F |     ADD R6, R6, 1\n
+ 292 | ???? |     ; Pop and restore return address\n
+ 293 | 30A0 |     LDR R7, R6, 0\n
+ 294 | 30A1 |     ADD R6, R6, 1\n
+ 295 | ???? |     ; End of Callee Teardown\n
+ 296 | ???? |     \n
+ 297 | 30A2 |     RET\n
+ 298 | ???? | \n
+ 299 | ???? | \n
+ 300 | ???? | ;;  MERGE Pseudocode (see PDF for explanation and examples)\n
+ 301 | ???? | ;;  MERGE(int arr[], int buf[], int start, int mid, int end) {\n
+ 302 | ???? | ;;      i = start;\n
+ 303 | ???? | ;;      j = mid;\n
+ 304 | ???? | ;;      k = start;\n
+ 305 | ???? | ;;      while (i < mid && j < end) {\n
+ 306 | ???? | ;;          if arr[i] <= arr[j] {\n
+ 307 | ???? | ;;              buf[k] = arr[i];\n
+ 308 | ???? | ;;              k++;\n
+ 309 | ???? | ;;              i++;\n
+ 310 | ???? | ;;          } else {\n
+ 311 | ???? | ;;              buf[k] = arr[j];\n
+ 312 | ???? | ;;              k++;\n
+ 313 | ???? | ;;              j++;\n
+ 314 | ???? | ;;          }\n
+ 315 | ???? | ;;      }\n
+ 316 | ???? | ;;      while (i < mid) {\n
+ 317 | ???? | ;;          buf[k] = arr[i];\n
+ 318 | ???? | ;;          k++;\n
+ 319 | ???? | ;;          i++;\n
+ 320 | ???? | ;;      }\n
+ 321 | ???? | ;;      while (j < end) {\n
+ 322 | ???? | ;;          buf[k] = arr[j];\n
+ 323 | ???? | ;;          k++;\n
+ 324 | ???? | ;;          j++;\n
+ 325 | ???? | ;;      }\n
+ 326 | ???? | ;;      for (i = start; i < end; i++) {\n
+ 327 | ???? | ;;          arr[i] = buf[i];\n
+ 328 | ???? | ;;      }\n
+ 329 | ???? | ;;  }\n
+ 330 | ???? | \n
+ 331 | ???? | MERGE   ;; Do not change this label! Treat this as like the name of the function in a function header\n
+ 332 | ???? |         ;; Code your implementation for the MERGE subroutine here!\n
+ 333 | ???? |     \n
+ 334 | ???? |     ; Start of Callee buildup\n
+ 335 | ???? |     ; Return value\n
+ 336 | 30A3 |     ADD R6, R6, -1\n
+ 337 | ???? |     ; Return address\n
+ 338 | 30A4 |     ADD R6, R6, -1\n
+ 339 | 30A5 |     STR R7, R6, 0\n
+ 340 | ???? |     ; Old frame pointer\n
+ 341 | 30A6 |     ADD R6, R6, -1\n
+ 342 | 30A7 |     STR R5, R6, 0\n
+ 343 | ???? |     ; Space for local variables\n
+ 344 | 30A8 |     ADD R6, R6, -1\n
+ 345 | ???? |     ; Set frame pointer to stack pointer\n
+ 346 | 30A9 |     AND R5, R5, 0\n
+ 347 | 30AA |     ADD R5, R6, 0\n
+ 348 | ???? |     ; Save general purpose registers\n
+ 349 | 30AB |     ADD R6, R6, -1\n
+ 350 | 30AC |     STR R0, R6, 0\n
+ 351 | 30AD |     ADD R6, R6, -1\n
+ 352 | 30AE |     STR R1, R6, 0\n
+ 353 | 30AF |     ADD R6, R6, -1\n
+ 354 | 30B0 |     STR R2, R6, 0\n
+ 355 | 30B1 |     ADD R6, R6, -1\n
+ 356 | 30B2 |     STR R3, R6, 0\n
+ 357 | 30B3 |     ADD R6, R6, -1\n
+ 358 | 30B4 |     STR R4, R6, 0\n
+ 359 | ???? |     ; End of Callee buildup\n
+ 360 | ???? |     \n
+ 361 | ???? |     ; Actual MERGE code\n
+ 362 | 30B5 |     LDR R0, R5, 6   ; R0 = i = start\n
+ 363 | 30B6 |     LDR R1, R5, 7   ; R1 = j = mid\n
+ 364 | 30B7 |     LDR R2, R5, 6   ; R2 = k = start\n
+ 365 | ???? |     \n
+ 366 | ???? |     WHILE1BEGIN\n
+ 367 | ???? |     \n
+ 368 | ???? |     ; i < mid\n
+ 369 | 30B8 |     LDR R3, R5, 7   ; R3 = mid\n
+ 370 | 30B9 |     NOT R3, R3\n
+ 371 | 30BA |     ADD R3, R3, 1   ; R3 = -mid\n
+ 372 | 30BB |     ADD R3, R0, R3  ; R3 = i-mid\n
+ 373 | 30BC |     BRZP WHILE2BEGIN\n
+ 374 | ???? |     ; j < end\n
+ 375 | 30BD |     LDR R3, R5, 8   ; R3 = end\n
+ 376 | 30BE |     NOT R3, R3\n
+ 377 | 30BF |     ADD R3, R3, 1   ; R3 = -end\n
+ 378 | 30C0 |     ADD R3, R1, R3  ; R3 = j-end\n
+ 379 | 30C1 |     BRZP WHILE2BEGIN\n
+ 380 | ???? |     \n
+ 381 | ???? |     ; if arr[i] <= arr[j]\n
+ 382 | 30C2 |     LDR R3, R5, 4   ; R3 = arr\n
+ 383 | 30C3 |     ADD R3, R3, R0  ; R3 = arr+i\n
+ 384 | 30C4 |     LDR R3, R3, 0   ; R3 = arr[i]\n
+ 385 | 30C5 |     LDR R4, R5, 4   ; R4 = arr\n
+ 386 | 30C6 |     ADD R4, R4, R1  ; R4 = arr+j\n
+ 387 | 30C7 |     LDR R4, R4, 0   ; R4 = arr[j]\n
+ 388 | 30C8 |     NOT R4, R4\n
+ 389 | 30C9 |     ADD R4, R4, 1   ; R4 = -arr[j]\n
+ 390 | 30CA |     ADD R3, R3, R4  ; R3 = arr[i] - arr[j]\n
+ 391 | 30CB |     BRP ELSE\n
+ 392 | ???? |     \n
+ 393 | ???? |     ; inside if block\n
+ 394 | 30CC |     LDR R3, R5, 5   ; R3 = buf\n
+ 395 | 30CD |     ADD R3, R3, R2  ; R3 = buf+k\n
+ 396 | 30CE |     LDR R4, R5, 4   ; R4 = arr\n
+ 397 | 30CF |     ADD R4, R4, R0  ; R4 = arr+i\n
+ 398 | 30D0 |     LDR R4, R4, 0   ; R4 = arr[i]\n
+ 399 | 30D1 |     STR R4, R3, 0   ; buf[k] = arr[i]\n
+ 400 | 30D2 |     ADD R2, R2, 1   ; k++\n
+ 401 | 30D3 |     ADD R0, R0, 1   ; i++\n
+ 402 | 30D4 |     BR WHILE1BEGIN      ; dont execute else after if\n
+ 403 | ???? |     \n
+ 404 | ???? |     ; inside else block\n
+ 405 | ???? |     ELSE\n
+ 406 | 30D5 |     LDR R3, R5, 5   ; R3 = buf\n
+ 407 | 30D6 |     ADD R3, R3, R2  ; R3 = buf+k\n
+ 408 | 30D7 |     LDR R4, R5, 4   ; R4 = arr\n
+ 409 | 30D8 |     ADD R4, R4, R1  ; R4 = arr+j\n
+ 410 | 30D9 |     LDR R4, R4, 0   ; R4 = arr[j]\n
+ 411 | 30DA |     STR R4, R3, 0   ; buf[k] = arr[j]\n
+ 412 | 30DB |     ADD R2, R2, 1   ; k++\n
+ 413 | 30DC |     ADD R1, R1, 1   ; j++\n
+ 414 | ???? |     \n
+ 415 | 30DD |     BR WHILE1BEGIN\n
+ 416 | ???? |     \n
+ 417 | ???? |     WHILE2BEGIN\n
+ 418 | ???? |     \n
+ 419 | ???? |     ; i < mid\n
+ 420 | 30DE |     LDR R3, R5, 7   ; R3 = mid\n
+ 421 | 30DF |     NOT R3, R3\n
+ 422 | 30E0 |     ADD R3, R3, 1   ; R3 = -mid\n
+ 423 | 30E1 |     ADD R3, R0, R3  ; R3 = i-mid\n
+ 424 | 30E2 |     BRZP WHILE3BEGIN\n
+ 425 | ???? |     \n
+ 426 | ???? |     ; inside while2 block\n
+ 427 | 30E3 |     LDR R3, R5, 5   ; R3 = buf\n
+ 428 | 30E4 |     ADD R3, R3, R2  ; R3 = buf+k\n
+ 429 | 30E5 |     LDR R4, R5, 4   ; R4 = arr\n
+ 430 | 30E6 |     ADD R4, R4, R0  ; R4 = arr+i\n
+ 431 | 30E7 |     LDR R4, R4, 0   ; R4 = arr[i]\n
+ 432 | 30E8 |     STR R4, R3, 0   ; buf[k] = arr[i]\n
+ 433 | 30E9 |     ADD R2, R2, 1   ; k++\n
+ 434 | 30EA |     ADD R0, R0, 1   ; i++\n
+ 435 | 30EB |     BR WHILE2BEGIN\n
+ 436 | ???? |     \n
+ 437 | ???? |     WHILE3BEGIN\n
+ 438 | ???? |     \n
+ 439 | ???? |     ; j < end\n
+ 440 | 30EC |     LDR R3, R5, 8   ; R3 = end\n
+ 441 | 30ED |     NOT R3, R3\n
+ 442 | 30EE |     ADD R3, R3, 1   ; R3 = -end\n
+ 443 | 30EF |     ADD R3, R1, R3  ; R3 = j-end\n
+ 444 | 30F0 |     BRZP WHILE3END\n
+ 445 | ???? |     \n
+ 446 | ???? |     ; inside while3 block\n
+ 447 | 30F1 |     LDR R3, R5, 5   ; R3 = buf\n
+ 448 | 30F2 |     ADD R3, R3, R2  ; R3 = buf+k\n
+ 449 | 30F3 |     LDR R4, R5, 4   ; R4 = arr\n
+ 450 | 30F4 |     ADD R4, R4, R1  ; R4 = arr+j\n
+ 451 | 30F5 |     LDR R4, R4, 0   ; R4 = arr[j]\n
+ 452 | 30F6 |     STR R4, R3, 0   ; buf[k] = arr[j]\n
+ 453 | 30F7 |     ADD R2, R2, 1   ; k++\n
+ 454 | 30F8 |     ADD R1, R1, 1   ; j++\n
+ 455 | 30F9 |     BR WHILE3BEGIN\n
+ 456 | ???? |     \n
+ 457 | ???? |     WHILE3END\n
+ 458 | ???? |     \n
+ 459 | ???? |     ; can clear registers they dont matter anymore\n
+ 460 | 30FA |     LDR R0, R5, 6   ; R0 = i = start\n
+ 461 | ???? |     \n
+ 462 | ???? |     ; for loop\n
+ 463 | ???? |     FORBEGIN\n
+ 464 | 30FB |     LDR R1, R5, 8   ; R1 = end\n
+ 465 | 30FC |     NOT R1, R1\n
+ 466 | 30FD |     ADD R1, R1, 1   ; R1 = -end\n
+ 467 | 30FE |     ADD R1, R0, R1  ; R1 = i-end\n
+ 468 | 30FF |     BRZP FOREND\n
+ 469 | ???? |     \n
+ 470 | ???? |     ; inside for block\n
+ 471 | 3100 |     LDR R2, R5, 5   ; R2 = buf\n
+ 472 | 3101 |     ADD R2, R2, R0  ; R2 = buf+i\n
+ 473 | 3102 |     LDR R2, R2, 0   ; R2 = buf[i]\n
+ 474 | 3103 |     LDR R1, R5, 4   ; R1 = arr\n
+ 475 | 3104 |     ADD R1, R1, R0  ; R1 = arr+i\n
+ 476 | 3105 |     STR R2, R1, 0   ; arr[i] = buf[i]\n
+ 477 | 3106 |     ADD R0, R0, 1   ; i++\n
+ 478 | 3107 |     BR FORBEGIN\n
+ 479 | ???? |     \n
+ 480 | ???? |     FOREND\n
+ 481 | ???? |     \n
+ 482 | ???? |     ; Start of Callee Teardown\n
+ 483 | ???? |     ; No return value\n
+ 484 | ???? |     ; Restore general purpose registers\n
+ 485 | 3108 |     LDR R4, R6, 0\n
+ 486 | 3109 |     ADD R6, R6, 1\n
+ 487 | 310A |     LDR R3, R6, 0\n
+ 488 | 310B |     ADD R6, R6, 1\n
+ 489 | 310C |     LDR R2, R6, 0\n
+ 490 | 310D |     ADD R6, R6, 1\n
+ 491 | 310E |     LDR R1, R6, 0\n
+ 492 | 310F |     ADD R6, R6, 1\n
+ 493 | 3110 |     LDR R0, R6, 0\n
+ 494 | 3111 |     ADD R6, R6, 1\n
+ 495 | ???? |     ; Pop local variables\n
+ 496 | 3112 |     ADD R6, R6, 1\n
+ 497 | ???? |     ; Pop and restore frame pointer\n
+ 498 | 3113 |     LDR R5, R6, 0\n
+ 499 | 3114 |     ADD R6, R6, 1\n
+ 500 | ???? |     ; Pop and restore return address\n
+ 501 | 3115 |     LDR R7, R6, 0\n
+ 502 | 3116 |     ADD R6, R6, 1\n
+ 503 | ???? |     ; End of Callee Teardown    \n
+ 504 | ???? |     \n
+ 505 | 3117 |     RET\n
+ 506 | ???? | \n
+ 507 | ???? | .end\n
+ 508 | ???? |     \n
+ 509 | ???? | ;; You may change the values in these arrays for debugging. Remember to change the value of LENGTH as well. \n
+ 510 | ???? | .orig x4000\n
+ 511 | 4000 |     .fill 5 \n
+ 512 | 4001 |     .fill 2 \n
+ 513 | 4002 |     .fill 3 \n
+ 514 | 4003 |     .fill 1\n
+ 515 | ???? | .end\n
+ 516 | ???? | \n
+ 517 | ???? | .orig x5000\n
+ 518 | 5000 |     .fill 5 \n
+ 519 | 5001 |     .fill 2 \n
+ 520 | 5002 |     .fill 3 \n
+ 521 | 5003 |     .fill 1\n
+ 522 | ???? | .end\n
+ 523 | ???? | 
+====================

@@ -1,0 +1,146 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+32
+5020
+221D
+1201
+6240
+0402
+1021
+0FFA
+5260
+54A0
+1480
+14BF
+56E0
+16C2
+96FF
+16E1
+5920
+1901
+1903
+060B
+260B
+16C1
+68C0
+2A08
+1B42
+6D40
+7CC0
+7940
+1261
+14BF
+0FED
+F025
+4000
+4000
+6
+0068
+0065
+006C
+006C
+006F
+0000
+
+.SYMBOL
+ADDR | EXT | LABEL
+3001 |   0 | WHILESTART
+3007 |   0 | WHILEEND
+300B |   0 | WHILE2START
+301E |   0 | WHILE2END
+301F |   0 | STRING
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL       | INDEX
+WHILESTART  |   677
+WHILEEND    |   862
+WHILE2START |  1001
+WHILE2END   |  1630
+STRING      |  1754
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ;;=============================================================\n
+   1 | ???? | ;; CS 2110 - Spring 2025\n
+   2 | ???? | ;; Homework 4 - Reverse String \n
+   3 | ???? | ;;=============================================================\n
+   4 | ???? | ;; Name: Philip Dobranowski\n
+   5 | ???? | ;;=============================================================\n
+   6 | ???? | \n
+   7 | ???? | .orig x3000\n
+   8 | ???? | ;; Suggested Pseudocode (see PDF for explanation)\n
+   9 | ???? | ;;\n
+  10 | ???? | ;; int length = 0;\n
+  11 | ???? | ;; while (STRING[length] != 0) {\n
+  12 | ???? | ;;      length++;\n
+  13 | ???? | ;; }\n
+  14 | ???? | ;;\n
+  15 | ???? | ;;\n
+  16 | ???? | ;; int start = 0;\n
+  17 | ???? | ;; int end = length - 1;\n
+  18 | ???? | \n
+  19 | ???? | ;; while (start < end) {\n
+  20 | ???? | ;;      char temp = STRING[start];\n
+  21 | ???? | ;;      STRING[start] = STRING[end];\n
+  22 | ???? | ;;      STRING[end] = temp;\n
+  23 | ???? | \n
+  24 | ???? | ;;      start++;\n
+  25 | ???? | ;;      end--;\n
+  26 | ???? | ;;}\n
+  27 | ???? | \n
+  28 | 3000 |     AND R0, R0, 0       ; length = 0\n
+  29 | ???? |     \n
+  30 | ???? |     WHILESTART\n
+  31 | 3001 |     LD R1, STRING ; start of string\n
+  32 | 3002 |     ADD R1, R0, R1\n
+  33 | 3003 |     LDR R1, R1, 0       ; get string[length]\n
+  34 | 3004 |     BRZ WHILEEND\n
+  35 | 3005 |     ADD R0, R0, 1       ; length++\n
+  36 | 3006 |     BR WHILESTART\n
+  37 | ???? |     WHILEEND\n
+  38 | ???? |     \n
+  39 | 3007 |     AND R1, R1, 0       ; start = 0\n
+  40 | 3008 |     AND R2, R2, 0\n
+  41 | 3009 |     ADD R2, R2, R0\n
+  42 | 300A |     ADD R2, R2, -1      ; end = length - 1\n
+  43 | ???? |     \n
+  44 | ???? |     WHILE2START\n
+  45 | 300B |     AND R3, R3, 0\n
+  46 | 300C |     ADD R3, R3, R2      ; get end\n
+  47 | 300D |     NOT R3, R3\n
+  48 | 300E |     ADD R3, R3, 1       ; -end\n
+  49 | 300F |     AND R4, R4, 0\n
+  50 | 3010 |     ADD R4, R4, R1\n
+  51 | 3011 |     ADD R4, R4, R3      ; start - end\n
+  52 | 3012 |     BRZP WHILE2END\n
+  53 | 3013 |     LD R3, STRING\n
+  54 | 3014 |     ADD R3, R3, R1      ; R3 = addr of string[start]\n
+  55 | 3015 |     LDR R4, R3, 0       ; R4 = string[start]\n
+  56 | 3016 |     LD R5, STRING\n
+  57 | 3017 |     ADD R5, R5, R2      ; R5 = addr of string[end]\n
+  58 | 3018 |     LDR R6, R5, 0       ; R6 = string[end]\n
+  59 | 3019 |     STR R6, R3, 0       ; string[start] = string[end]\n
+  60 | 301A |     STR R4, R5, 0       ; string[end] = string[start]\n
+  61 | 301B |     ADD R1, R1, 1       ; start++\n
+  62 | 301C |     ADD R2, R2, -1      ; end--\n
+  63 | 301D |     BR WHILE2START\n
+  64 | ???? |     WHILE2END\n
+  65 | ???? |     \n
+  66 | 301E |     HALT\n
+  67 | ???? | \n
+  68 | ???? | ;; Do not rename or remove any existing labels\n
+  69 | ???? | ;; You may change the value of LENGTH for debugging\n
+  70 | 301F | STRING .fill x4000\n
+  71 | ???? | .end\n
+  72 | ???? | \n
+  73 | ???? | ;; You may change the value of the string for debugging\n
+  74 | ???? | .orig x4000\n
+  75 | 4000 |     .stringz \"hello\"\n
+  76 | ???? | .end\n
+  77 | ???? | 
+====================

@@ -1,0 +1,548 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+172
+2C0A
+1DBF
+200A
+7180
+1DBF
+2006
+7180
+4834
+6180
+1DA3
+F025
+F000
+4000
+0007
+0041
+0061
+001A
+1DBF
+1DBF
+7F80
+1DBF
+7B80
+1DBF
+5B60
+1BA0
+1DBF
+7180
+1DBF
+7380
+1DBF
+7580
+1DBF
+7780
+1DBF
+7980
+6144
+6345
+947F
+14A1
+1602
+0802
+1002
+0FFA
+7143
+6980
+1DA1
+6780
+1DA1
+6580
+1DA1
+6380
+1DA1
+6180
+1DA1
+1DA1
+6B80
+1DA1
+6F80
+1DA1
+C1C0
+1DBF
+1DBF
+7F80
+1DBF
+7B80
+1DBF
+5B60
+1BA0
+1DBF
+7180
+1DBF
+7380
+1DBF
+7580
+1DBF
+7780
+1DBF
+7980
+5020
+6344
+1240
+6240
+0402
+1021
+0FFA
+5260
+943F
+14A1
+1442
+0641
+6744
+16C1
+66C0
+29B1
+993F
+1921
+18C4
+0818
+29AC
+25AC
+1902
+993F
+1921
+18C4
+0211
+29A5
+993F
+1921
+16C4
+1DBF
+29A1
+7980
+1DBF
+6945
+18C4
+7980
+4F9C
+6780
+1DA3
+2997
+16C4
+0E1C
+2993
+993F
+1921
+18C4
+0817
+298E
+258F
+1902
+993F
+1921
+18C4
+0210
+2987
+993F
+1921
+16C4
+1DBF
+2984
+7980
+1DBF
+6945
+18C4
+7980
+4F7F
+6780
+1DA3
+2979
+16C4
+6544
+1481
+7680
+1261
+0FBB
+7143
+6980
+1DA1
+6780
+1DA1
+6580
+1DA1
+6380
+1DA1
+6180
+1DA1
+1DA1
+6B80
+1DA1
+6F80
+1DA1
+C1C0
+4000
+6
+0068
+0065
+006C
+006C
+006F
+0000
+
+.SYMBOL
+ADDR | EXT | LABEL
+300B |   0 | STACK_PTR
+300C |   0 | STRING
+300D |   0 | SHIFT
+300E |   0 | ASCIIUPPERA
+300F |   0 | ASCIILOWERA
+3010 |   0 | ALPHABETLEN
+3011 |   0 | MOD
+3025 |   0 | WHILEBEGIN
+302B |   0 | WHILEEND
+303C |   0 | ENCRYPT
+304F |   0 | WHILE2BEGIN
+3055 |   0 | WHILE2END
+3056 |   0 | FORBEGIN
+307A |   0 | IFEND
+3096 |   0 | ELIFEND
+309B |   0 | FOREND
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL       | INDEX
+STACK_PTR   |   807
+STRING      |   833
+SHIFT       |   856
+ASCIIUPPERA |   874
+ASCIILOWERA |   899
+ALPHABETLEN |   924
+MOD         |   948
+WHILEBEGIN  |  1940
+WHILEEND    |  2073
+ENCRYPT     |  2613
+WHILE2BEGIN |  4069
+WHILE2END   |  4277
+FORBEGIN    |  4324
+IFEND       |  5487
+ELIFEND     |  6382
+FOREND      |  6576
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ;;=============================================================\n
+   1 | ???? | ;; CS 2110 - Spring 2025\n
+   2 | ???? | ;; Homework 4 - Caesar Cipher\n
+   3 | ???? | ;;=============================================================\n
+   4 | ???? | ;; Name: Philip Dobranowski\n
+   5 | ???? | ;;=============================================================\n
+   6 | ???? | \n
+   7 | ???? | ;;  In this file, you must implement the \'MOD\' and \'ENCRYPT\' subroutines.\n
+   8 | ???? |     \n
+   9 | ???? | .orig x3000\n
+  10 | ???? |     ;; You do not need to write anything here\n
+  11 | 3000 |     LD R6, STACK_PTR\n
+  12 | ???? |     \n
+  13 | ???? |     ;; Pushes arguments (string to encrypt, shift)\n
+  14 | 3001 |     ADD R6, R6, -1\n
+  15 | 3002 |     LD R0, SHIFT\n
+  16 | 3003 |     STR R0, R6, 0\n
+  17 | ???? |     \n
+  18 | 3004 |     ADD R6, R6, -1\n
+  19 | 3005 |     LD R0, STRING\n
+  20 | 3006 |     STR R0, R6, 0\n
+  21 | ???? |     \n
+  22 | 3007 |     JSR ENCRYPT\n
+  23 | ???? |     \n
+  24 | 3008 |     LDR R0, R6, 0\n
+  25 | 3009 |     ADD R6, R6, 3\n
+  26 | ???? | \n
+  27 | 300A |     HALT\n
+  28 | ???? |     \n
+  29 | ???? |     ;; Do not rename or remove any existing labels\n
+  30 | ???? |     ;; You may change the value of STRING, LENGTH, SHIFT for debugging\n
+  31 | 300B |     STACK_PTR .fill xF000\n
+  32 | 300C |     STRING .fill x4000\n
+  33 | 300D |     SHIFT .fill 7\n
+  34 | 300E |     ASCIIUPPERA .fill 65\n
+  35 | 300F |     ASCIILOWERA .fill 97\n
+  36 | 3010 |     ALPHABETLEN .fill 26\n
+  37 | ???? | \n
+  38 | ???? | \n
+  39 | ???? | \n
+  40 | ???? | MOD ;; Do not change this label! Treat this as like the name of the function in a function header\n
+  41 | ???? |     ;; Code your implementation for the MOD subroutine here!\n
+  42 | ???? | \n
+  43 | ???? |     ;;  MOD Pseudocode (see PDF for explanation and examples)   \n
+  44 | ???? | ;;  \n
+  45 | ???? | ;;  MOD(int a, int b) {\n
+  46 | ???? | ;;      while (a >= b) {\n
+  47 | ???? | ;;          a -= b;\n
+  48 | ???? | ;;      }\n
+  49 | ???? | ;;      return a;\n
+  50 | ???? | ;;  }\n
+  51 | ???? |     \n
+  52 | ???? |     ; Start of Callee buildup\n
+  53 | ???? |     ; Return value\n
+  54 | 3011 |     ADD R6, R6, -1\n
+  55 | ???? |     ; Return address\n
+  56 | 3012 |     ADD R6, R6, -1\n
+  57 | 3013 |     STR R7, R6, 0\n
+  58 | ???? |     ; Old frame pointer\n
+  59 | 3014 |     ADD R6, R6, -1\n
+  60 | 3015 |     STR R5, R6, 0\n
+  61 | ???? |     ; Space for local variables\n
+  62 | 3016 |     ADD R6, R6, -1\n
+  63 | ???? |     ; Set frame pointer to stack pointer\n
+  64 | 3017 |     AND R5, R5, 0\n
+  65 | 3018 |     ADD R5, R6, 0\n
+  66 | ???? |     ; Save general purpose registers\n
+  67 | 3019 |     ADD R6, R6, -1\n
+  68 | 301A |     STR R0, R6, 0\n
+  69 | 301B |     ADD R6, R6, -1\n
+  70 | 301C |     STR R1, R6, 0\n
+  71 | 301D |     ADD R6, R6, -1\n
+  72 | 301E |     STR R2, R6, 0\n
+  73 | 301F |     ADD R6, R6, -1\n
+  74 | 3020 |     STR R3, R6, 0\n
+  75 | 3021 |     ADD R6, R6, -1\n
+  76 | 3022 |     STR R4, R6, 0\n
+  77 | ???? |     ; End of Callee buildup\n
+  78 | ???? |     \n
+  79 | ???? |     ; Actual GCD code\n
+  80 | 3023 |     LDR R0, R5, 4   ; R0 = a\n
+  81 | 3024 |     LDR R1, R5, 5   ; R1 = b\n
+  82 | ???? |     WHILEBEGIN\n
+  83 | 3025 |     NOT R2, R1\n
+  84 | 3026 |     ADD R2, R2, 1   ; R2 = -b\n
+  85 | 3027 |     ADD R3, R0, R2\n
+  86 | 3028 |     BRN WHILEEND\n
+  87 | 3029 |     ADD R0, R0, R2\n
+  88 | 302A |     BR WHILEBEGIN\n
+  89 | ???? |     WHILEEND\n
+  90 | ???? |     \n
+  91 | ???? |     ; Start of Callee Teardown\n
+  92 | ???? |     ; Save return value\n
+  93 | 302B |     STR R0, R5, 3\n
+  94 | ???? |     ; Restore general purpose registers\n
+  95 | 302C |     LDR R4, R6, 0\n
+  96 | 302D |     ADD R6, R6, 1\n
+  97 | 302E |     LDR R3, R6, 0\n
+  98 | 302F |     ADD R6, R6, 1\n
+  99 | 3030 |     LDR R2, R6, 0\n
+ 100 | 3031 |     ADD R6, R6, 1\n
+ 101 | 3032 |     LDR R1, R6, 0\n
+ 102 | 3033 |     ADD R6, R6, 1\n
+ 103 | 3034 |     LDR R0, R6, 0\n
+ 104 | 3035 |     ADD R6, R6, 1\n
+ 105 | ???? |     ; Pop local variables\n
+ 106 | 3036 |     ADD R6, R6, 1\n
+ 107 | ???? |     ; Pop and restore frame pointer\n
+ 108 | 3037 |     LDR R5, R6, 0\n
+ 109 | 3038 |     ADD R6, R6, 1\n
+ 110 | ???? |     ; Pop and restore return address\n
+ 111 | 3039 |     LDR R7, R6, 0\n
+ 112 | 303A |     ADD R6, R6, 1\n
+ 113 | ???? |     ; End of Callee Teardown\n
+ 114 | ???? |     \n
+ 115 | 303B |     RET\n
+ 116 | ???? | \n
+ 117 | ???? | \n
+ 118 | ???? | ENCRYPT ;; Do not change this label! Treat this as like the name of the function in a function header\n
+ 119 | ???? |         ;; Code your implementation for the ENCRYPT subroutine here!\n
+ 120 | ???? | \n
+ 121 | ???? |     ;;  ENCRYPT Pseudocode (see PDF for explanation and examples)\n
+ 122 | ???? | ;;\n
+ 123 | ???? | ;;  ENCRYPT(String str, int k) {\n
+ 124 | ???? | ;;      int length = 0;\n
+ 125 | ???? | ;;      while (str[length] != 0) {\n
+ 126 | ???? | ;;          length++;\n
+ 127 | ???? | ;;      }\n
+ 128 | ???? | ;;      for (int i = 0; i < length; i++) {\n
+ 129 | ???? | ;;          char = str[i];\n
+ 130 | ???? | ;;          if (char >= \'a\' && char <= \'z\') {\n
+ 131 | ???? | ;;              char = char - \'a\';\n
+ 132 | ???? | ;;              char = MOD(char + k, 26);\n
+ 133 | ???? | ;;              char = char + \'a\';\n
+ 134 | ???? | ;;          } else if (char >= \'A\' && char <= \'Z\') {\n
+ 135 | ???? | ;;              char = char - \'A\';\n
+ 136 | ???? | ;;              char = MOD(char + k, 26);\n
+ 137 | ???? | ;;              char = char + \'A\';\n
+ 138 | ???? | ;;          }\n
+ 139 | ???? | ;;\n
+ 140 | ???? | ;;          str[i] = char;\n
+ 141 | ???? | ;;      }\n
+ 142 | ???? | ;;  }\n
+ 143 | ???? |     \n
+ 144 | ???? |     ; Start of Callee buildup\n
+ 145 | ???? |     ; Return value\n
+ 146 | 303C |     ADD R6, R6, -1\n
+ 147 | ???? |     ; Return address\n
+ 148 | 303D |     ADD R6, R6, -1\n
+ 149 | 303E |     STR R7, R6, 0\n
+ 150 | ???? |     ; Old frame pointer\n
+ 151 | 303F |     ADD R6, R6, -1\n
+ 152 | 3040 |     STR R5, R6, 0\n
+ 153 | ???? |     ; Space for local variables\n
+ 154 | 3041 |     ADD R6, R6, -1\n
+ 155 | ???? |     ; Set frame pointer to stack pointer\n
+ 156 | 3042 |     AND R5, R5, 0\n
+ 157 | 3043 |     ADD R5, R6, 0\n
+ 158 | ???? |     ; Save general purpose registers\n
+ 159 | 3044 |     ADD R6, R6, -1\n
+ 160 | 3045 |     STR R0, R6, 0\n
+ 161 | 3046 |     ADD R6, R6, -1\n
+ 162 | 3047 |     STR R1, R6, 0\n
+ 163 | 3048 |     ADD R6, R6, -1\n
+ 164 | 3049 |     STR R2, R6, 0\n
+ 165 | 304A |     ADD R6, R6, -1\n
+ 166 | 304B |     STR R3, R6, 0\n
+ 167 | 304C |     ADD R6, R6, -1\n
+ 168 | 304D |     STR R4, R6, 0\n
+ 169 | ???? |     ; End of Callee buildup\n
+ 170 | ???? |     \n
+ 171 | ???? |     ; Actual ENCRYPT code\n
+ 172 | 304E |     AND R0, R0, 0   ; length = 0\n
+ 173 | ???? |     WHILE2BEGIN\n
+ 174 | 304F |     LDR R1, R5, 4   ; R1 = addr of str\n
+ 175 | 3050 |     ADD R1, R1, R0  ; R1 = addr of str+length\n
+ 176 | 3051 |     LDR R1, R1, 0   ; R1 = str[length]\n
+ 177 | 3052 |     BRZ WHILE2END\n
+ 178 | 3053 |     ADD R0, R0, 1   ; length++\n
+ 179 | 3054 |     BR WHILE2BEGIN\n
+ 180 | ???? |     WHILE2END\n
+ 181 | ???? |     \n
+ 182 | 3055 |     AND R1, R1, 0   ; i = 0\n
+ 183 | ???? |     FORBEGIN\n
+ 184 | 3056 |     NOT R2, R0\n
+ 185 | 3057 |     ADD R2, R2, 1   ; R2 = -length\n
+ 186 | 3058 |     ADD R2, R1, R2  ; R2 = i-length\n
+ 187 | 3059 |     BRZP FOREND\n
+ 188 | ???? |     \n
+ 189 | 305A |     LDR R3, R5, 4   ; R3 = addr of str\n
+ 190 | 305B |     ADD R3, R3, R1  ; R3 = addr of str+i\n
+ 191 | 305C |     LDR R3, R3, 0   ; R3 = char = str[i]\n
+ 192 | ???? |     \n
+ 193 | ???? |     ; char >= \'a\'\n
+ 194 | 305D |     LD R4, ASCIILOWERA\n
+ 195 | 305E |     NOT R4, R4\n
+ 196 | 305F |     ADD R4, R4, 1   ; R4 = -\'a\'\n
+ 197 | 3060 |     ADD R4, R3, R4  ; R4 = char - \'a\'\n
+ 198 | 3061 |     BRN IFEND\n
+ 199 | ???? |     \n
+ 200 | ???? |     ; char <= \'z\'\n
+ 201 | 3062 |     LD R4, ASCIILOWERA\n
+ 202 | 3063 |     LD R2, ALPHABETLEN\n
+ 203 | 3064 |     ADD R4, R4, R2\n
+ 204 | 3065 |     NOT R4, R4\n
+ 205 | 3066 |     ADD R4, R4, 1   ; R4 = -\'z\'\n
+ 206 | 3067 |     ADD R4, R3, R4  ; R4 = char - \'z\'\n
+ 207 | 3068 |     BRP IFEND\n
+ 208 | ???? |     \n
+ 209 | ???? |     ; inside if\n
+ 210 | 3069 |     LD R4, ASCIILOWERA\n
+ 211 | 306A |     NOT R4, R4\n
+ 212 | 306B |     ADD R4, R4, 1   ; R4 = -\'a\'\n
+ 213 | 306C |     ADD R3, R3, R4  ; R3 = char - \'a\'\n
+ 214 | ???? |     \n
+ 215 | 306D |     ADD R6, R6, -1\n
+ 216 | 306E |     LD R4, ALPHABETLEN\n
+ 217 | 306F |     STR R4, R6, 0   ; put 26 as parameter\n
+ 218 | ???? |     \n
+ 219 | 3070 |     ADD R6, R6, -1\n
+ 220 | 3071 |     LDR R4, R5, 5   ; R4 = k\n
+ 221 | 3072 |     ADD R4, R3, R4  ; R4 = char + K\n
+ 222 | 3073 |     STR R4, R6, 0   ; put char+k as parameter\n
+ 223 | ???? |     \n
+ 224 | 3074 |     JSR MOD\n
+ 225 | ???? |     \n
+ 226 | 3075 |     LDR R3, R6, 0   ; R3 = return value of MOD\n
+ 227 | 3076 |     ADD R6, R6, 3   ; fix stack after call\n
+ 228 | ???? |     \n
+ 229 | 3077 |     LD R4, ASCIILOWERA\n
+ 230 | 3078 |     ADD R3, R3, R4  ; char = char + \'a\'\n
+ 231 | ???? |     \n
+ 232 | 3079 |     BR ELIFEND      ; dont enter the else if block\n
+ 233 | ???? | \n
+ 234 | ???? |     IFEND\n
+ 235 | ???? |     \n
+ 236 | ???? |     ; char >= \'A\'\n
+ 237 | 307A |     LD R4, ASCIIUPPERA\n
+ 238 | 307B |     NOT R4, R4\n
+ 239 | 307C |     ADD R4, R4, 1   ; R4 = -\'A\'\n
+ 240 | 307D |     ADD R4, R3, R4  ; R4 = char - \'A\'\n
+ 241 | 307E |     BRN ELIFEND\n
+ 242 | ???? |     \n
+ 243 | ???? |     ; char <= \'Z\'\n
+ 244 | 307F |     LD R4, ASCIIUPPERA\n
+ 245 | 3080 |     LD R2, ALPHABETLEN\n
+ 246 | 3081 |     ADD R4, R4, R2  ; R4 = \'Z\'\n
+ 247 | 3082 |     NOT R4, R4\n
+ 248 | 3083 |     ADD R4, R4, 1   ; R4 = -\'Z\'\n
+ 249 | 3084 |     ADD R4, R3, R4  ; R4 = char - \'Z\'\n
+ 250 | 3085 |     BRP ELIFEND\n
+ 251 | ???? |     \n
+ 252 | ???? |     ; inside elif\n
+ 253 | 3086 |     LD R4, ASCIIUPPERA\n
+ 254 | 3087 |     NOT R4, R4\n
+ 255 | 3088 |     ADD R4, R4, 1   ; R4 = -\'A\'\n
+ 256 | 3089 |     ADD R3, R3, R4  ; R3 = char - \'A\'\n
+ 257 | ???? |     \n
+ 258 | 308A |     ADD R6, R6, -1\n
+ 259 | 308B |     LD R4, ALPHABETLEN\n
+ 260 | 308C |     STR R4, R6, 0   ; put 26 as parameter\n
+ 261 | ???? |     \n
+ 262 | 308D |     ADD R6, R6, -1\n
+ 263 | 308E |     LDR R4, R5, 5   ; R4 = k\n
+ 264 | 308F |     ADD R4, R3, R4  ; R4 = char + k\n
+ 265 | 3090 |     STR R4, R6, 0   ; put char+k as parameter\n
+ 266 | ???? |     \n
+ 267 | 3091 |     JSR MOD\n
+ 268 | ???? |     \n
+ 269 | 3092 |     LDR R3, R6, 0   ; char = return value of MOD\n
+ 270 | 3093 |     ADD R6, R6, 3   ; fix stack after call\n
+ 271 | 3094 |     LD R4, ASCIIUPPERA\n
+ 272 | 3095 |     ADD R3, R3, R4  ; char = char + \'A\'\n
+ 273 | ???? |     \n
+ 274 | ???? |     ELIFEND\n
+ 275 | ???? |     \n
+ 276 | 3096 |     LDR R2, R5, 4   ; R2 = addr of string\n
+ 277 | 3097 |     ADD R2, R2, R1  ; R2 = addr of string+i\n
+ 278 | 3098 |     STR R3, R2, 0   ; string[i] = char\n
+ 279 | ???? |     \n
+ 280 | 3099 |     ADD R1, R1, 1   ; i++\n
+ 281 | 309A |     BR FORBEGIN\n
+ 282 | ???? |     \n
+ 283 | ???? |     FOREND\n
+ 284 | ???? |     \n
+ 285 | ???? |     ; Start of Callee Teardown\n
+ 286 | ???? |     ; Save return value\n
+ 287 | 309B |     STR R0, R5, 3\n
+ 288 | ???? |     ; Restore general purpose registers\n
+ 289 | 309C |     LDR R4, R6, 0\n
+ 290 | 309D |     ADD R6, R6, 1\n
+ 291 | 309E |     LDR R3, R6, 0\n
+ 292 | 309F |     ADD R6, R6, 1\n
+ 293 | 30A0 |     LDR R2, R6, 0\n
+ 294 | 30A1 |     ADD R6, R6, 1\n
+ 295 | 30A2 |     LDR R1, R6, 0\n
+ 296 | 30A3 |     ADD R6, R6, 1\n
+ 297 | 30A4 |     LDR R0, R6, 0\n
+ 298 | 30A5 |     ADD R6, R6, 1\n
+ 299 | ???? |     ; Pop local variables\n
+ 300 | 30A6 |     ADD R6, R6, 1\n
+ 301 | ???? |     ; Pop and restore frame pointer\n
+ 302 | 30A7 |     LDR R5, R6, 0\n
+ 303 | 30A8 |     ADD R6, R6, 1\n
+ 304 | ???? |     ; Pop and restore return address\n
+ 305 | 30A9 |     LDR R7, R6, 0\n
+ 306 | 30AA |     ADD R6, R6, 1\n
+ 307 | ???? |     ; End of Callee Teardown\n
+ 308 | ???? |     \n
+ 309 | 30AB |     RET\n
+ 310 | ???? | \n
+ 311 | ???? | .end\n
+ 312 | ???? | \n
+ 313 | ???? | ;; You may change the value of the string for debugging\n
+ 314 | ???? | .orig x4000\n
+ 315 | 4000 |     .stringz \"hello\"\n
+ 316 | ???? | .end\n
+ 317 | ???? | 
+====================

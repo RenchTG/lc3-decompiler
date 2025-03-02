@@ -1,0 +1,149 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+32
+5020
+A21C
+54A0
+14A1
+56E0
+16A0
+2818
+993F
+1921
+16C4
+0610
+2612
+16C2
+66C0
+5920
+1901
+993F
+1921
+5B60
+1AC4
+0604
+5260
+1243
+5020
+1002
+14A1
+0FE9
+B001
+F025
+4000
+5000
+0005
+4000
+1
+????
+5000
+5
+FFFF
+0002
+0007
+0003
+FFF8
+
+.SYMBOL
+ADDR | EXT | LABEL
+3004 |   0 | FORSTART
+3019 |   0 | NOTIF
+301B |   0 | FOREND
+301D |   0 | RESULT
+301E |   0 | ARRAY
+301F |   0 | LENGTH
+4000 |   0 | ANSWER
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL    | INDEX
+FORSTART |   727
+NOTIF    |  1293
+FOREND   |  1337
+RESULT   |  1472
+ARRAY    |  1491
+LENGTH   |  1509
+ANSWER   |  1546
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ;;=============================================================\n
+   1 | ???? | ;; CS 2110 - Spring 2025\n
+   2 | ???? | ;; Homework 4 - Find Min Index\n
+   3 | ???? | ;;=============================================================\n
+   4 | ???? | ;; Name: Philip Dobranowski\n
+   5 | ???? | ;;=============================================================\n
+   6 | ???? | \n
+   7 | ???? | .orig x3000\n
+   8 | ???? | ;; Suggested Pseudocode (see PDF for explanation)\n
+   9 | ???? | ;;\n
+  10 | ???? | ;;  int minIndex = 0;\n
+  11 | ???? | ;;  int minValue = ARRAY[0];\n
+  12 | ???? | ;;  for (int i = 1; i < LENGTH; i++) {\n
+  13 | ???? | ;;      if (ARRAY[i] < minValue) {\n
+  14 | ???? | ;;          minValue = ARRAY[i];\n
+  15 | ???? | ;;          minIndex = i;\n
+  16 | ???? | ;;      }\n
+  17 | ???? | ;;  }\n
+  18 | ???? | ;;  mem[mem[RESULT]] = minIndex;\n
+  19 | ???? |     \n
+  20 | 3000 |     AND R0, R0, 0   ; R0 = minIndex = 0\n
+  21 | 3001 |     LDI R1, ARRAY   ; R1 = minValue = ARRAY[0]\n
+  22 | 3002 |     AND R2, R2, 0\n
+  23 | 3003 |     ADD R2, R2, 1   ; R2 = i = 1\n
+  24 | ???? |     \n
+  25 | ???? |     FORSTART\n
+  26 | 3004 |     AND R3, R3, 0\n
+  27 | 3005 |     ADD R3, R2, 0   ; R3 = i\n
+  28 | 3006 |     LD R4, LENGTH\n
+  29 | 3007 |     NOT R4, R4\n
+  30 | 3008 |     ADD R4, R4, 1   ; R4 = -length\n
+  31 | 3009 |     ADD R3, R3, R4  ; R3 = i - length\n
+  32 | 300A |     BRZP FOREND\n
+  33 | ???? |     \n
+  34 | 300B |     LD R3, ARRAY\n
+  35 | 300C |     ADD R3, R3, R2  ; R3 = addr of array[i]\n
+  36 | 300D |     LDR R3, R3, 0   ; R3 = array[i]\n
+  37 | 300E |     AND R4, R4, 0\n
+  38 | 300F |     ADD R4, R4, R1\n
+  39 | 3010 |     NOT R4, R4\n
+  40 | 3011 |     ADD R4, R4, 1   ; R4 = -minValue\n
+  41 | 3012 |     AND R5, R5, 0\n
+  42 | 3013 |     ADD R5, R3, R4  ; R5 = array[i] - minValue\n
+  43 | 3014 |     BRZP NOTIF\n
+  44 | 3015 |     AND R1, R1, 0\n
+  45 | 3016 |     ADD R1, R1, R3  ; minValue = array[i]\n
+  46 | 3017 |     AND R0, R0, 0\n
+  47 | 3018 |     ADD R0, R0, R2  ; minIndex = i\n
+  48 | ???? |     NOTIF\n
+  49 | 3019 |     ADD R2, R2, 1\n
+  50 | 301A |     BR FORSTART\n
+  51 | ???? |     FOREND\n
+  52 | 301B |     STI R0, RESULT\n
+  53 | 301C |     HALT\n
+  54 | ???? | \n
+  55 | ???? | ;; Do not rename or remove any existing labels\n
+  56 | ???? | ;; You may change the value of LENGTH for debugging\n
+  57 | 301D | RESULT .fill x4000\n
+  58 | 301E | ARRAY .fill x5000\n
+  59 | 301F | LENGTH .fill 5\n
+  60 | ???? | .end\n
+  61 | ???? | \n
+  62 | ???? | .orig x4000\n
+  63 | 4000 |     ANSWER .blkw 1\n
+  64 | ???? | .end\n
+  65 | ???? | \n
+  66 | ???? | ;; You may change these values for debuggin\n
+  67 | ???? | .orig x5000\n
+  68 | 5000 |     .fill -1\n
+  69 | 5001 |     .fill 2 \n
+  70 | 5002 |     .fill 7 \n
+  71 | 5003 |     .fill 3 \n
+  72 | 5004 |     .fill -8 \n
+  73 | ???? | .end\n
+  74 | ???? | 
+====================
