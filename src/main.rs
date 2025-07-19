@@ -1,6 +1,6 @@
 use std::fs;
 use std::collections::HashMap;
-use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset, CondCode};
+use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset};
 
 #[derive(Debug, Clone)]
 struct BasicBlock {
@@ -65,8 +65,8 @@ fn disassemble(text: Vec<&str>, symbols: HashMap<u16, &str>) -> (HashMap<u16, St
     (disassembled, origs)
 }
 
-fn identify_code_data(disassembly: HashMap<u16, Stmt>, origs: Vec<u16>) -> Vec<u16> {
-    let mut call_list: Vec<u16> = origs.clone();
+fn identify_code_data(disassembly: HashMap<u16, Stmt>, _origs: Vec<u16>) -> Vec<u16> {
+    let mut call_list: Vec<u16> = vec![0x3000];
     let mut function_list: Vec<u16> = Vec::new();
     let mut work_list: Vec<u16> = Vec::new();
 
@@ -208,15 +208,11 @@ fn create_basic_blocks(entry_address: u16, disassembly: &HashMap<u16, Stmt>) -> 
             continue;
         }
 
-        let mut current_addr = current_address;
-        let block_start = current_addr;
+        let block_start = current_address;
 
         loop {
-            let next_label = find_next_label(current_addr, disassembly);
-            let next_branch = find_next_branch(current_addr, disassembly);
-
-            //println!("Current address: {:04X}, Block start: {:04X}", current_addr, block_start);
-            //println!("Next label: {:?}, Next branch: {:?}", next_label, next_branch);
+            let next_label = find_next_label(current_address, disassembly);
+            let next_branch = find_next_branch(current_address, disassembly);
 
             match (next_label, next_branch) {
                 // Both label and branch found
@@ -384,11 +380,13 @@ fn main() {
     let (disassembly, origs) = disassemble(text, symbols);
 
     // Print disassembly for debugging purposes
+    println!("Disassembly:");
     let mut sorted_entries: Vec<_> = disassembly.clone().into_iter().collect();
     sorted_entries.sort_by_key(|&(key, _)| key);
     for (addr, stmt) in sorted_entries {
         println!("{:04X}: {}", addr, stmt);
     }
+    println!();
 
     let function_list = identify_code_data(disassembly.clone(), origs);
 
@@ -397,6 +395,7 @@ fn main() {
     for addr in &function_list {
         println!("{:04X}", addr);
     }
+    println!();
     
     for &entry_addr in &function_list {
         let blocks = create_basic_blocks(entry_addr, &disassembly);
