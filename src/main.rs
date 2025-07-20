@@ -1,5 +1,5 @@
 use std::fs;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset};
 
 #[derive(Debug, Clone)]
@@ -8,6 +8,8 @@ struct BasicBlock {
     length: u16,
     preds: Vec<u16>,
     succs: Vec<u16>,
+    dominators: Vec<u16>,
+    visited: bool,
 }
 
 impl BasicBlock {
@@ -17,6 +19,8 @@ impl BasicBlock {
             length: 0,
             preds: Vec::new(),
             succs: Vec::new(),
+            dominators: Vec::new(),
+            visited: false,
         }
     }
 }
@@ -365,6 +369,56 @@ fn create_basic_blocks(entry_address: u16, disassembly: &HashMap<u16, Stmt>) -> 
 
     block_list
 }
+
+fn compute_dominators(blocks: &mut HashMap<u16, BasicBlock>, entry_addr: u16) {
+    let all_blocks: Vec<u16> = blocks.keys().cloned().collect();
+
+    for &block_addr in &all_blocks {
+        let block = blocks.get_mut(&block_addr).unwrap();
+        if block_addr == entry_addr {
+            block.dominators = vec![entry_addr];
+        } else {
+            block.dominators = all_blocks.clone();
+        }
+    }
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+
+        for &block_addr in &all_blocks {
+            if block_addr == entry_addr {
+                continue;
+            }
+
+            let preds = blocks[&block_addr].preds.clone();
+            let mut new_dominators: Option<HashSet<u16>> = None;
+
+            for &pred in &preds {
+                let pred_dominators: HashSet<u16> = blocks[&pred].dominators.iter().cloned().collect();
+
+                match new_dominators {
+                    None => new_dominators = Some(pred_dominators),
+                    Some(ref mut current) => {
+                        *current = current.intersection(&pred_dominators).cloned().collect();
+                    }
+                }
+            }
+
+            let mut final_dominators = new_dominators.unwrap_or_else(HashSet::new);
+            final_dominators.insert(block_addr);
+
+            let mut final_dominators_vec: Vec<u16> = final_dominators.into_iter().collect();
+            final_dominators_vec.sort();
+
+            let current_dominators = &blocks[&block_addr].dominators;
+            if current_dominators != &final_dominators_vec {
+                changed = true;
+                blocks.get_mut(&block_addr).unwrap().dominators = final_dominators_vec;
+            }
+        }
+    }
+}
     
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -379,7 +433,6 @@ fn main() {
     let (text, symbols) = gen_sections(&input_obj);
     let (disassembly, origs) = disassemble(text, symbols);
 
-    // Print disassembly for debugging purposes
     println!("Disassembly:");
     let mut sorted_entries: Vec<_> = disassembly.clone().into_iter().collect();
     sorted_entries.sort_by_key(|&(key, _)| key);
@@ -390,7 +443,6 @@ fn main() {
 
     let function_list = identify_code_data(disassembly.clone(), origs);
 
-    // Print identified functions for debugging purposes
     println!("Identified functions:");
     for addr in &function_list {
         println!("{:04X}", addr);
@@ -398,17 +450,21 @@ fn main() {
     println!();
     
     for &entry_addr in &function_list {
-        let blocks = create_basic_blocks(entry_addr, &disassembly);
+        let mut blocks = create_basic_blocks(entry_addr, &disassembly);
 
-        // Print basic blocks for debugging purposes
-        let mut sorted_blocks: Vec<_> = blocks.into_iter().collect();
+        compute_dominators(&mut blocks, entry_addr);
+
+        println!("Basic blocks:");
+        let mut sorted_blocks: Vec<_> = blocks.iter().collect();
         sorted_blocks.sort_by_key(|&(addr, _)| addr);
         for (addr, block) in sorted_blocks {
             let preds: Vec<String> = block.preds.iter().map(|&p| format!("{:04X}", p)).collect();
             let succs: Vec<String> = block.succs.iter().map(|&s| format!("{:04X}", s)).collect();
-            println!("Block at {:04X}: length = {}, preds = [{}], succs = [{}]", 
-                     addr, block.length, preds.join(", "), succs.join(", "));
+            let dominators: Vec<String> = block.dominators.iter().map(|&d| format!("{:04X}", d)).collect();
+            println!("Block at {:04X}: length = {}, preds = [{}], succs = [{}], dominators = [{}]",
+                     addr, block.length, preds.join(", "), succs.join(", "), dominators.join(", "));
         }
+        println!();
     }
 }
 
