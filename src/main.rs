@@ -25,6 +25,23 @@ impl BasicBlock {
     }
 }
 
+#[derive(Debug, Clone)]
+struct Loop {
+    header: u16,
+    blocks: HashSet<u16>,
+}
+
+impl Loop {
+    fn new(header: u16) -> Self {
+        let mut blocks = HashSet::new();
+        blocks.insert(header);
+        Loop {
+            header,
+            blocks,
+        }
+    }
+}
+
 fn gen_sections(content: &str) -> (Vec<&str>, HashMap<u16, &str>) {
     let sections: Vec<&str> = content.split("\n\n").collect();
 
@@ -419,6 +436,52 @@ fn compute_dominators(blocks: &mut HashMap<u16, BasicBlock>, entry_addr: u16) {
         }
     }
 }
+
+fn natural_loop_for_edge(header: u16, tail: u16, blocks: &HashMap<u16, BasicBlock>) -> Loop {
+    let mut work_list: Vec<u16> = Vec::new();
+    let mut loop_obj = Loop::new(header);
+
+    if header != tail {
+        loop_obj.blocks.insert(tail);
+        work_list.push(tail);
+    }
+
+    while let Some(block_addr) = work_list.pop() {
+        if let Some(block) = blocks.get(&block_addr) {
+            for &pred in &block.preds {
+                if !loop_obj.blocks.contains(&pred) {
+                    loop_obj.blocks.insert(pred);
+                    work_list.push(pred);
+                }
+            }
+        }
+    }
+
+    loop_obj
+}
+
+fn compute_natural_loops(blocks: &HashMap<u16, BasicBlock>, entry_addr: u16) -> Vec<Loop> {
+    let mut loop_set: Vec<Loop> = Vec::new();
+
+    for (&block_addr, block) in blocks {
+        if block_addr == entry_addr {
+            continue;
+        }
+
+        for &succ in &block.succs {
+            // Every successor that dominates its predecessor
+            // must be the header of a loop.
+            // That is, block -> succ is a back edge.
+
+            if block.dominators.contains(&succ) {
+                let natural_loop = natural_loop_for_edge(succ, block_addr, blocks);
+                loop_set.push(natural_loop);
+            }
+        }
+    }
+    
+    loop_set
+}
     
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -463,6 +526,16 @@ fn main() {
             let dominators: Vec<String> = block.dominators.iter().map(|&d| format!("{:04X}", d)).collect();
             println!("Block at {:04X}: length = {}, preds = [{}], succs = [{}], dominators = [{}]",
                      addr, block.length, preds.join(", "), succs.join(", "), dominators.join(", "));
+        }
+        println!();
+
+        let loops = compute_natural_loops(&blocks, entry_addr);
+
+        println!("Natural loops:");
+        for (i, loop_obj) in loops.iter().enumerate() {
+            let loop_blocks: Vec<String> = loop_obj.blocks.iter().map(|&b| format!("{:04X}", b)).collect();
+            println!("Loop {}: header = {:04X}, blocks = [{}]", 
+                     i + 1, loop_obj.header, loop_blocks.join(", "));
         }
         println!();
     }
