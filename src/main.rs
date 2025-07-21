@@ -10,6 +10,7 @@ struct BasicBlock {
     succs: Vec<u16>,
     dominators: Vec<u16>,
     visited: bool,
+    statements: Vec<HighLevelStmt>,
 }
 
 impl BasicBlock {
@@ -21,6 +22,7 @@ impl BasicBlock {
             succs: Vec::new(),
             dominators: Vec::new(),
             visited: false,
+            statements: Vec::new(),
         }
     }
 }
@@ -40,6 +42,30 @@ impl Loop {
             blocks,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+enum HighLevelStmt {
+    DoWhile {
+        expr: Option<String>,
+        blocks: Vec<u16>,
+        break_block: Option<u16>,
+        continue_block: Option<u16>,
+    },
+    If {
+        condition: String,
+        true_blocks: Vec<HighLevelStmt>,
+        else_blocks: Vec<HighLevelStmt>,
+        destination: Option<u16>,
+    },
+    Goto {
+        destination: u16,
+    },
+    Break,
+    Continue,
+    Assignment {
+        content: String,
+    },
 }
 
 fn gen_sections(content: &str) -> (Vec<&str>, HashMap<u16, &str>) {
@@ -482,6 +508,168 @@ fn compute_natural_loops(blocks: &HashMap<u16, BasicBlock>, entry_addr: u16) -> 
     
     loop_set
 }
+
+fn get_last_compare_instruction(last_block_addr: u16, disassembly: &HashMap<u16, Stmt>, blocks: &HashMap<u16, BasicBlock>) -> Option<String> {
+    // Find last compare instruction in block. For LC-3 this is the instruction before the last
+    // branch. Typically an ADD that sets condition codes.
+
+    if let Some(block) = blocks.get(&last_block_addr) {
+        let block_start = last_block_addr;
+        let block_end = last_block_addr + block.length - 1;
+
+        // Start with branch instruction at the end of the block
+        let mut branch_cc = 7;
+        if let Some(stmt) = disassembly.get(&block_end) {
+            if let StmtKind::Instr(AsmInstr::BR(cc, _)) = &stmt.nucleus {
+                branch_cc = *cc;
+            }
+        }
+
+        // Search backwards for last condition code setting instruction
+        // ADD, AND, NOT, LD, LDI, LDR set condition codes
+        for addr in (block_start..block_end).rev() {
+            if let Some(stmt) = disassembly.get(&addr) {
+                let sets_condition_code = match &stmt.nucleus {
+                    StmtKind::Instr(AsmInstr::ADD(_, _, _)) => true,
+                    StmtKind::Instr(AsmInstr::AND(_, _, _)) => true,
+                    StmtKind::Instr(AsmInstr::NOT(_, _)) => true,
+                    StmtKind::Instr(AsmInstr::LD(_, _)) => true,
+                    StmtKind::Instr(AsmInstr::LDI(_, _)) => true,
+                    StmtKind::Instr(AsmInstr::LDR(_, _, _)) => true,
+                    _ => false,
+                };
+
+                if sets_condition_code {
+                    let instr_str = format!("{}", stmt);
+                    let condition = match branch_cc {
+                        0 => format!("!({})", instr_str),
+                        1 => format!("({}) > 0", instr_str),
+                        2 => format!("({}) == 0", instr_str),
+                        3 => format!("({}) >= 0", instr_str),
+                        4 => format!("({}) < 0", instr_str),
+                        5 => format!("({}) != 0", instr_str),
+                        6 => format!("({}) <= 0", instr_str),
+                        7 => "true".to_string(),
+                        _ => format!("unknown_condition({})", instr_str),
+                    };
+                    return Some(condition);
+                }
+            }
+        }
+    }
+    
+    Some("true".to_string())
+}
+
+fn find_post_dominator(loop_blocks: &HashSet<u16>, blocks: &HashMap<u16, BasicBlock>) -> Option<u16> {
+    // Find the post-dominator (the block that all paths from loop blocks eventually reach)
+    for &loop_block in loop_blocks {
+        if let Some(block) = blocks.get(&loop_block) {
+            for &succ in &block.succs {
+                if !loop_blocks.contains(&succ) {
+                    return Some(succ);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn structure_break_continue(stmt: &mut HighLevelStmt, cont_block: Option<u16>, break_block: Option<u16>) {
+    match stmt {
+        HighLevelStmt::Goto { destination } => {
+            if let Some(cont) = cont_block {
+                if *destination == cont {
+                    *stmt = HighLevelStmt::Continue;
+                    return;
+                }
+            }
+            if let Some(brk) = break_block {
+                if *destination == brk {
+                    *stmt = HighLevelStmt::Break;
+                    return;
+                }
+            }
+        },
+        HighLevelStmt::If { true_blocks, else_blocks, .. } => {
+            for true_stmt in true_blocks.iter_mut() {
+                structure_break_continue(true_stmt, cont_block, break_block);
+            }
+            for else_stmt in else_blocks.iter_mut() {
+                structure_break_continue(else_stmt, cont_block, break_block);
+            }
+        },
+        _ => {}
+    }
+}
+
+fn structure_loops(loops: &mut Vec<Loop>, blocks: &mut HashMap<u16, BasicBlock>, disassembly: &HashMap<u16, Stmt>) {
+    // Sort loops from innermost loop to outermost loop
+    loops.sort_by(|a, b| a.blocks.len().cmp(&b.blocks.len()));
+
+    for loop_obj in loops.iter() {
+        // Create new do-while statement
+        let last_block = loop_obj.blocks.iter()
+            .filter(|&&addr| {
+                if let Some(block) = blocks.get(&addr) {
+                    block.succs.contains(&loop_obj.header)
+                } else {
+                    false
+                }
+            })
+            .next()
+            .copied();
+
+        // doWhile->expr = new Expr(loop->blocks.last->lastCompareInstr)
+        let expr = if let Some(last_addr) = last_block {
+            get_last_compare_instruction(last_addr, disassembly, blocks)
+        } else {
+            Some("true".to_string())
+        };
+
+        // doWhile->blocks = loop->blocks
+        let do_while_blocks: Vec<u16> = loop_obj.blocks.iter().cloned().collect();
+
+        // doWhile->breakBlock = loop->blocks->postDominator
+        let break_block = find_post_dominator(&loop_obj.blocks, blocks);
+
+        // doWhile->continueBlock = loop->blocks.last
+        let continue_block = last_block;
+
+        let mut do_while = HighLevelStmt::DoWhile {
+            expr,
+            blocks: do_while_blocks,
+            break_block,
+            continue_block,
+        };
+
+        if let Some(cont_addr) = continue_block {
+            if let Some(cont_block) = blocks.get(&cont_addr) {
+                let should_nullify = cont_block.statements.len() != 1 ||
+                    match cont_block.statements.get(0) {
+                        Some(HighLevelStmt::If { destination, .. }) => {
+                            destination != &Some(loop_obj.header)
+                        },
+                        _ => true,
+                    };
+
+                if should_nullify {
+                    if let HighLevelStmt::DoWhile { ref mut continue_block, .. } = do_while {
+                        *continue_block = None;
+                    }
+                }
+            }
+        }
+
+        // StructureBreakContinue(doWhile, doWhile->continueBlock, doWhile->breakBlock)
+        structure_break_continue(&mut do_while, continue_block, break_block);
+
+        // loop->header->lastStatement = doWhile
+        if let Some(header_block) = blocks.get_mut(&loop_obj.header) {
+            header_block.statements.push(do_while);
+        }
+    }
+}
     
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -529,13 +717,38 @@ fn main() {
         }
         println!();
 
-        let loops = compute_natural_loops(&blocks, entry_addr);
+        let mut loops = compute_natural_loops(&blocks, entry_addr);
 
         println!("Natural loops:");
         for (i, loop_obj) in loops.iter().enumerate() {
             let loop_blocks: Vec<String> = loop_obj.blocks.iter().map(|&b| format!("{:04X}", b)).collect();
             println!("Loop {}: header = {:04X}, blocks = [{}]", 
                      i + 1, loop_obj.header, loop_blocks.join(", "));
+        }
+        println!();
+
+        structure_loops(&mut loops, &mut blocks, &disassembly);
+
+        for (addr, block) in blocks.iter() {
+            if !block.statements.is_empty() {
+                println!("Block {:04X} structured statements:", addr);
+                for (i, stmt) in block.statements.iter().enumerate() {
+                    match stmt {
+                        HighLevelStmt::DoWhile { expr, blocks, break_block, continue_block } => {
+                            let true_str = &"true".to_string();
+                            let expr_str = expr.as_ref().unwrap_or(true_str);
+                            let blocks_str: Vec<String> = blocks.iter().map(|&b| format!("{:04X}", b)).collect();
+                            let break_str = break_block.map(|b| format!("{:04X}", b)).unwrap_or("None".to_string());
+                            let continue_str = continue_block.map(|b| format!("{:04X}", b)).unwrap_or("None".to_string());
+                            println!("  {}: do-while (condition: {}, blocks: [{}], break: {}, continue: {})", 
+                                   i, expr_str, blocks_str.join(", "), break_str, continue_str);
+                        },
+                        _ => {
+                            println!("  {}: {:?}", i, stmt);
+                        }
+                    }
+                }
+            }
         }
         println!();
     }
