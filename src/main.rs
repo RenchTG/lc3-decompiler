@@ -509,13 +509,13 @@ fn compute_natural_loops(blocks: &HashMap<u16, BasicBlock>, entry_addr: u16) -> 
     loop_set
 }
 
-fn get_last_compare_instruction(last_block_addr: u16, disassembly: &HashMap<u16, Stmt>, blocks: &HashMap<u16, BasicBlock>) -> Option<String> {
+fn get_last_compare_instruction(block_addr: u16, disassembly: &HashMap<u16, Stmt>, blocks: &HashMap<u16, BasicBlock>) -> Option<String> {
     // Find last compare instruction in block. For LC-3 this is the instruction before the last
-    // branch. Typically an ADD that sets condition codes.
+    // branch. Typically an ADD that sets condition codes. Combine this with cc for expr.
 
-    if let Some(block) = blocks.get(&last_block_addr) {
-        let block_start = last_block_addr;
-        let block_end = last_block_addr + block.length - 1;
+    if let Some(block) = blocks.get(&block_addr) {
+        let block_start = block_addr;
+        let block_end = block_addr + block.length - 1;
 
         // Start with branch instruction at the end of the block
         let mut branch_cc = 7;
@@ -542,14 +542,14 @@ fn get_last_compare_instruction(last_block_addr: u16, disassembly: &HashMap<u16,
                 if sets_condition_code {
                     let instr_str = format!("{}", stmt);
                     let condition = match branch_cc {
-                        0 => format!("!({})", instr_str),
-                        1 => format!("({}) > 0", instr_str),
-                        2 => format!("({}) == 0", instr_str),
-                        3 => format!("({}) >= 0", instr_str),
-                        4 => format!("({}) < 0", instr_str),
-                        5 => format!("({}) != 0", instr_str),
-                        6 => format!("({}) <= 0", instr_str),
-                        7 => "true".to_string(),
+                        0 => "true".to_string(), // never branch = always continue
+                        1 => format!("({}) <= 0", instr_str), // branch if positive = continue if not positive
+                        2 => format!("({}) != 0", instr_str), // branch if zero = continue if not zero
+                        3 => format!("({}) < 0", instr_str), // branch if >= 0 = continue if < 0
+                        4 => format!("({}) >= 0", instr_str), // branch if negative = continue if not negative
+                        5 => format!("({}) == 0", instr_str), // branch if not zero = continue if zero
+                        6 => format!("({}) > 0", instr_str), // branch if <= 0 = continue if > 0
+                        7 => "false".to_string(), // always branch = never continue (shouldn't happen in loops)
                         _ => format!("unknown_condition({})", instr_str),
                     };
                     return Some(condition);
@@ -559,20 +559,6 @@ fn get_last_compare_instruction(last_block_addr: u16, disassembly: &HashMap<u16,
     }
     
     Some("true".to_string())
-}
-
-fn find_post_dominator(loop_blocks: &HashSet<u16>, blocks: &HashMap<u16, BasicBlock>) -> Option<u16> {
-    // Find the post-dominator (the block that all paths from loop blocks eventually reach)
-    for &loop_block in loop_blocks {
-        if let Some(block) = blocks.get(&loop_block) {
-            for &succ in &block.succs {
-                if !loop_blocks.contains(&succ) {
-                    return Some(succ);
-                }
-            }
-        }
-    }
-    None
 }
 
 fn structure_break_continue(stmt: &mut HighLevelStmt, cont_block: Option<u16>, break_block: Option<u16>) {
@@ -607,8 +593,35 @@ fn structure_loops(loops: &mut Vec<Loop>, blocks: &mut HashMap<u16, BasicBlock>,
     // Sort loops from innermost loop to outermost loop
     loops.sort_by(|a, b| a.blocks.len().cmp(&b.blocks.len()));
 
+    // for each loop in loopSet
     for loop_obj in loops.iter() {
-        // Create new do-while statement
+        // doWhile->expr = new Expr(loop->blocks.last->lastCompareInstr)
+        let expr = get_last_compare_instruction(loop_obj.header, disassembly, blocks);
+
+        // doWhile->blocks = loop->blocks
+        let do_while_blocks: Vec<u16> = loop_obj.blocks.iter().cloned().collect();
+
+        // doWhile->breakBlock = loop->blocks->postDominator
+        let post_dominator = {
+            let mut result = None;
+            for &loop_block in &loop_obj.blocks {
+                if let Some(block) = blocks.get(&loop_block) {
+                    for &succ in &block.succs {
+                        if !loop_obj.blocks.contains(&succ) {
+                            result = Some(succ);
+                            break;
+                        }
+                    }
+                }
+                if result.is_some() {
+                    break;
+                }
+            }
+            result
+        };
+        let break_block = post_dominator;
+
+        // doWhile->continueBlock = loop->blocks.last
         let last_block = loop_obj.blocks.iter()
             .filter(|&&addr| {
                 if let Some(block) = blocks.get(&addr) {
@@ -619,39 +632,23 @@ fn structure_loops(loops: &mut Vec<Loop>, blocks: &mut HashMap<u16, BasicBlock>,
             })
             .next()
             .copied();
-
-        // doWhile->expr = new Expr(loop->blocks.last->lastCompareInstr)
-        let expr = if let Some(last_addr) = last_block {
-            get_last_compare_instruction(last_addr, disassembly, blocks)
-        } else {
-            Some("true".to_string())
-        };
-
-        // doWhile->blocks = loop->blocks
-        let do_while_blocks: Vec<u16> = loop_obj.blocks.iter().cloned().collect();
-
-        // doWhile->breakBlock = loop->blocks->postDominator
-        let break_block = find_post_dominator(&loop_obj.blocks, blocks);
-
-        // doWhile->continueBlock = loop->blocks.last
         let continue_block = last_block;
 
+        // doWhile = new Statement(DoWhile)
         let mut do_while = HighLevelStmt::DoWhile {
             expr,
             blocks: do_while_blocks,
             break_block,
             continue_block,
         };
-
+        
+        // Check if continue block should be nullified
+        // if doWhile->continueBlock->onlyStatement != If or
+        //    doWhile->continueBlock->onlyStatement.destination != header
+        //     doWhile->continueBlock = NULL
         if let Some(cont_addr) = continue_block {
             if let Some(cont_block) = blocks.get(&cont_addr) {
-                let should_nullify = cont_block.statements.len() != 1 ||
-                    match cont_block.statements.get(0) {
-                        Some(HighLevelStmt::If { destination, .. }) => {
-                            destination != &Some(loop_obj.header)
-                        },
-                        _ => true,
-                    };
+                let should_nullify = cont_block.statements.len() > 0; // has structured statements
 
                 if should_nullify {
                     if let HighLevelStmt::DoWhile { ref mut continue_block, .. } = do_while {
