@@ -37,24 +37,20 @@ impl fmt::Display for HighLevelStmt {
 
 #[derive(Debug, Clone)]
 struct BasicBlock {
-    address: u16,
     length: u16,
     preds: Vec<u16>,
     succs: Vec<u16>,
     dominators: Vec<u16>,
-    visited: bool,
     statements: Vec<HighLevelStmt>,
 }
 
 impl BasicBlock {
-    fn new(address: u16) -> Self {
+    fn new() -> Self {
         BasicBlock {
-            address,
             length: 0,
             preds: Vec::new(),
             succs: Vec::new(),
             dominators: Vec::new(),
-            visited: false,
             statements: Vec::new(),
         }
     }
@@ -210,7 +206,7 @@ fn identify_code_data(disassembly: HashMap<u16, Stmt>, _origs: Vec<u16>) -> Vec<
 
 fn get_block_at(start_address: u16, block_list: &mut HashMap<u16, BasicBlock>) -> &mut BasicBlock {
     if !block_list.contains_key(&start_address) {
-        block_list.insert(start_address, BasicBlock::new(start_address));
+        block_list.insert(start_address, BasicBlock::new());
     }
     block_list.get_mut(&start_address).unwrap()
 }
@@ -272,174 +268,276 @@ fn get_branch_destination(address: u16, disassembly: &HashMap<u16, Stmt>) -> Opt
     None
 }
 
+//fn create_basic_blocks(entry_address: u16, disassembly: &HashMap<u16, Stmt>) -> HashMap<u16, BasicBlock> {
+//    let mut block_list: HashMap<u16, BasicBlock> = HashMap::new();
+//    let mut work_list: Vec<u16> = Vec::new();
+//
+//    // Initialize with entry block
+//    {
+//        let entry_block = get_block_at(entry_address, &mut block_list);
+//        entry_block.address = entry_address;
+//    }
+//    work_list.push(entry_address);
+//
+//    while let Some(current_address) = work_list.pop() {
+//        if block_list.contains_key(&current_address) && block_list[&current_address].length > 0 {
+//            continue;
+//        }
+//
+//        let block_start = current_address;
+//
+//        loop {
+//            let next_label = find_next_label(current_address, disassembly);
+//            let next_branch = find_next_branch(current_address, disassembly);
+//
+//            match (next_label, next_branch) {
+//                // Both label and branch found
+//                (Some(label_addr), Some((branch_addr, branch_after, destination_known, is_conditional))) => {
+//                    // Label is first, block ends at label
+//                    if label_addr < branch_after {
+//                        {
+//                            let block = get_block_at(block_start, &mut block_list);
+//                            block.length = label_addr - block_start;
+//                        }
+//
+//                        // Successor relationship
+//                        let next_block_addr = label_addr;
+//                        get_block_at(next_block_addr, &mut block_list);
+//
+//                        {
+//                            let block = get_block_at(block_start, &mut block_list);
+//                            block.succs.push(next_block_addr);
+//                        }
+//                        {
+//                            let next_block = get_block_at(next_block_addr, &mut block_list);
+//                            next_block.preds.push(block_start);
+//                        }
+//
+//                        work_list.push(label_addr);
+//                        break;
+//                    }
+//                    // Branch comes first, block ends at branch
+//                    else {
+//                        {
+//                            let block = get_block_at(block_start, &mut block_list);
+//                            block.length = branch_after - block_start;
+//                        }
+//
+//                        if !destination_known {
+//                            break;
+//                        }
+//
+//                        // Branch destination address
+//                        if let Some(dest_addr) = get_branch_destination(branch_addr, disassembly) {
+//                            get_block_at(dest_addr, &mut block_list);
+//
+//                            {
+//                                let block = get_block_at(block_start, &mut block_list);
+//                                block.succs.push(dest_addr);
+//                            }
+//                            {
+//                                let dest_block = get_block_at(dest_addr, &mut block_list);
+//                                dest_block.preds.push(block_start);
+//                            }
+//
+//                            work_list.push(dest_addr);
+//                        }
+//
+//                        if !is_conditional {
+//                            break;
+//                        }
+//
+//                        // Fall through for conditional branches
+//                        let fall_through_addr = branch_after;
+//                        get_block_at(fall_through_addr, &mut block_list);
+//
+//                        {
+//                            let block = get_block_at(block_start, &mut block_list);
+//                            block.succs.push(fall_through_addr);
+//                        }
+//                        {
+//                            let fall_through_block = get_block_at(fall_through_addr, &mut block_list);
+//                            fall_through_block.preds.push(block_start);
+//                        }
+//
+//                        work_list.push(fall_through_addr);
+//                        break;
+//                    }
+//                },
+//                // Only branch found
+//                (None, Some((branch_addr, branch_after, destination_known, is_conditional))) => {
+//                    {
+//                        let block = get_block_at(block_start, &mut block_list);
+//                        block.length = branch_after - block_start;
+//                    }
+//
+//                    if !destination_known {
+//                        break;
+//                    }
+//
+//                    if let Some(dest_addr) = get_branch_destination(branch_addr, disassembly) {
+//                        get_block_at(dest_addr, &mut block_list);
+//
+//                        {
+//                            let block = get_block_at(block_start, &mut block_list);
+//                            block.succs.push(dest_addr);
+//                        }
+//                        {
+//                            let dest_block = get_block_at(dest_addr, &mut block_list);
+//                            dest_block.preds.push(block_start);
+//                        }
+//
+//                        work_list.push(dest_addr);
+//                    }
+//
+//                    if !is_conditional {
+//                        break;
+//                    }
+//
+//                    let fall_through_addr = branch_after;
+//                    get_block_at(fall_through_addr, &mut block_list);
+//
+//                    {
+//                        let block = get_block_at(block_start, &mut block_list);
+//                        block.succs.push(fall_through_addr);
+//                    }
+//                    {
+//                        let fall_through_block = get_block_at(fall_through_addr, &mut block_list);
+//                        fall_through_block.preds.push(block_start);
+//                    }
+//
+//                    work_list.push(fall_through_addr);
+//                    break;
+//                },
+//                // Only label found
+//                (Some(label_addr), None) => {
+//                    {
+//                        let block = get_block_at(block_start, &mut block_list);
+//                        block.length = label_addr - block_start;
+//                    }
+//
+//                    let next_block_addr = label_addr;
+//                    get_block_at(next_block_addr, &mut block_list);
+//
+//                    {
+//                        let block = get_block_at(block_start, &mut block_list);
+//                        block.succs.push(next_block_addr);
+//                    }
+//                    {
+//                        let next_block = get_block_at(next_block_addr, &mut block_list);
+//                        next_block.preds.push(block_start);
+//                    }
+//
+//                    work_list.push(label_addr);
+//                    break;
+//                },
+//                // No label or branch found
+//                (None, None) => {
+//                    break;
+//                }
+//            }
+//        }
+//    }
+//
+//    block_list
+//}
+
 fn create_basic_blocks(entry_address: u16, disassembly: &HashMap<u16, Stmt>) -> HashMap<u16, BasicBlock> {
     let mut block_list: HashMap<u16, BasicBlock> = HashMap::new();
     let mut work_list: Vec<u16> = Vec::new();
 
-    // Initialize with entry block
-    {
-        let entry_block = get_block_at(entry_address, &mut block_list);
-        entry_block.address = entry_address;
-    }
+    // Initialize with the main entry point.
+    get_block_at(entry_address, &mut block_list);
     work_list.push(entry_address);
 
-    while let Some(current_address) = work_list.pop() {
-        if block_list.contains_key(&current_address) && block_list[&current_address].length > 0 {
+    while let Some(block_start) = work_list.pop() {
+        // If the block has a non-zero length, it has already been processed.
+        if block_list.get(&block_start).map_or(false, |b| b.length > 0) {
             continue;
         }
 
-        let block_start = current_address;
+        // Find the next potential ends for the current block.
+        let next_label = find_next_label(block_start, disassembly);
+        let next_branch = find_next_branch(block_start, disassembly);
 
-        loop {
-            let next_label = find_next_label(current_address, disassembly);
-            let next_branch = find_next_branch(current_address, disassembly);
+        let mut successors = Vec::new();
+        let block_end_addr; // The address *after* the last instruction in this block.
 
-            match (next_label, next_branch) {
-                // Both label and branch found
-                (Some(label_addr), Some((branch_addr, branch_after, destination_known, is_conditional))) => {
-                    // Label is first, block ends at label
-                    if label_addr < branch_after {
-                        {
-                            let block = get_block_at(block_start, &mut block_list);
-                            block.length = label_addr - block_start;
-                        }
-
-                        // Successor relationship
-                        let next_block_addr = label_addr;
-                        get_block_at(next_block_addr, &mut block_list);
-
-                        {
-                            let block = get_block_at(block_start, &mut block_list);
-                            block.succs.push(next_block_addr);
-                        }
-                        {
-                            let next_block = get_block_at(next_block_addr, &mut block_list);
-                            next_block.preds.push(block_start);
-                        }
-
-                        work_list.push(label_addr);
-                        break;
-                    }
-                    // Branch comes first, block ends at branch
-                    else {
-                        {
-                            let block = get_block_at(block_start, &mut block_list);
-                            block.length = branch_after - block_start;
-                        }
-
-                        if !destination_known {
-                            break;
-                        }
-
-                        // Branch destination address
+        match (next_label, next_branch) {
+            // Case 1: Both a label and a branch are found. The earlier one terminates the block.
+            (Some(label_addr), Some((branch_addr, branch_after, dest_known, is_cond))) => {
+                if label_addr < branch_after {
+                    // The label appears before the branch instruction, so the block ends there.
+                    block_end_addr = label_addr;
+                    successors.push(label_addr); // The labeled instruction starts the next block.
+                } else {
+                    // The branch comes first, terminating the block.
+                    block_end_addr = branch_after;
+                    if dest_known {
                         if let Some(dest_addr) = get_branch_destination(branch_addr, disassembly) {
-                            get_block_at(dest_addr, &mut block_list);
-
-                            {
-                                let block = get_block_at(block_start, &mut block_list);
-                                block.succs.push(dest_addr);
-                            }
-                            {
-                                let dest_block = get_block_at(dest_addr, &mut block_list);
-                                dest_block.preds.push(block_start);
-                            }
-
-                            work_list.push(dest_addr);
+                            successors.push(dest_addr);
                         }
-
-                        if !is_conditional {
-                            break;
-                        }
-
-                        // Fall through for conditional branches
-                        let fall_through_addr = branch_after;
-                        get_block_at(fall_through_addr, &mut block_list);
-
-                        {
-                            let block = get_block_at(block_start, &mut block_list);
-                            block.succs.push(fall_through_addr);
-                        }
-                        {
-                            let fall_through_block = get_block_at(fall_through_addr, &mut block_list);
-                            fall_through_block.preds.push(block_start);
-                        }
-
-                        work_list.push(fall_through_addr);
-                        break;
                     }
-                },
-                // Only branch found
-                (None, Some((branch_addr, branch_after, destination_known, is_conditional))) => {
-                    {
-                        let block = get_block_at(block_start, &mut block_list);
-                        block.length = branch_after - block_start;
+                    if is_cond {
+                        successors.push(branch_after); // Add fall-through successor.
                     }
-
-                    if !destination_known {
-                        break;
-                    }
-
+                }
+            },
+            // Case 2: Only a branch is found.
+            (None, Some((branch_addr, branch_after, dest_known, is_cond))) => {
+                block_end_addr = branch_after;
+                if dest_known {
                     if let Some(dest_addr) = get_branch_destination(branch_addr, disassembly) {
-                        get_block_at(dest_addr, &mut block_list);
-
-                        {
-                            let block = get_block_at(block_start, &mut block_list);
-                            block.succs.push(dest_addr);
-                        }
-                        {
-                            let dest_block = get_block_at(dest_addr, &mut block_list);
-                            dest_block.preds.push(block_start);
-                        }
-
-                        work_list.push(dest_addr);
+                        successors.push(dest_addr);
                     }
+                }
+                if is_cond {
+                    successors.push(branch_after); // Add fall-through successor.
+                }
+            },
+            // Case 3: Only a label is found.
+            (Some(label_addr), None) => {
+                block_end_addr = label_addr;
+                successors.push(label_addr);
+            },
+            // Case 4: No further labels or branches. The block ends at the end of the code.
+            (None, None) => {
+                let mut last_addr = block_start;
+                while disassembly.contains_key(&(last_addr + 1)) {
+                    last_addr += 1;
+                }
+                block_end_addr = last_addr + 1;
+            }
+        }
 
-                    if !is_conditional {
-                        break;
-                    }
+        // --- Common logic for setting block length and wiring up the CFG ---
 
-                    let fall_through_addr = branch_after;
-                    get_block_at(fall_through_addr, &mut block_list);
+        // Set the length of the current block.
+        if let Some(block) = block_list.get_mut(&block_start) {
+            block.length = block_end_addr - block_start;
+        }
 
-                    {
-                        let block = get_block_at(block_start, &mut block_list);
-                        block.succs.push(fall_through_addr);
-                    }
-                    {
-                        let fall_through_block = get_block_at(fall_through_addr, &mut block_list);
-                        fall_through_block.preds.push(block_start);
-                    }
+        // Process all successors identified for the current block.
+        for succ_addr in successors {
+            // Ensure the successor block exists in the list.
+            get_block_at(succ_addr, &mut block_list);
 
-                    work_list.push(fall_through_addr);
-                    break;
-                },
-                // Only label found
-                (Some(label_addr), None) => {
-                    {
-                        let block = get_block_at(block_start, &mut block_list);
-                        block.length = label_addr - block_start;
-                    }
-
-                    let next_block_addr = label_addr;
-                    get_block_at(next_block_addr, &mut block_list);
-
-                    {
-                        let block = get_block_at(block_start, &mut block_list);
-                        block.succs.push(next_block_addr);
-                    }
-                    {
-                        let next_block = get_block_at(next_block_addr, &mut block_list);
-                        next_block.preds.push(block_start);
-                    }
-
-                    work_list.push(label_addr);
-                    break;
-                },
-                // No label or branch found
-                (None, None) => {
-                    break;
+            // Add successor to the current block's list.
+            if let Some(block) = block_list.get_mut(&block_start) {
+                if !block.succs.contains(&succ_addr) {
+                    block.succs.push(succ_addr);
                 }
             }
+
+            // Add the current block as a predecessor of the successor block.
+            if let Some(succ_block) = block_list.get_mut(&succ_addr) {
+                if !succ_block.preds.contains(&block_start) {
+                    succ_block.preds.push(block_start);
+                }
+            }
+
+            // Add the successor to the work list to be processed.
+            work_list.push(succ_addr);
         }
     }
 
@@ -1073,29 +1171,6 @@ fn main() {
         structure_if_else(&mut blocks, &disassembly);
 
         structure_ifs(&mut blocks, &disassembly);
-
-        //println!("Structured blocks:");
-        //for (addr, block) in blocks.iter() {
-        //    if !block.statements.is_empty() {
-        //        println!("Block {:04X} structured statements:", addr);
-        //        for (i, stmt) in block.statements.iter().enumerate() {
-        //            println!("  {}: {:?}", i, stmt);
-        //        }
-        //    }
-        //}
-        //println!();
-
-        println!("Structured blocks:");
-        for (addr, block) in blocks.iter() {
-            if !block.statements.is_empty() {
-                println!("Block {:04X} structured statements:", addr);
-                for (i, stmt) in block.statements.iter().enumerate() {
-                    // Use {} instead of {:?} to call your new Display implementation
-                    println!("  {}: {}", i, stmt);
-                }
-            }
-        }
-        println!();
     }
 }
 
