@@ -1,6 +1,6 @@
 use std::fs;
 use std::collections::{HashMap, HashSet};
-use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset};
+use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset, Reg, ImmOrReg};
 
 #[derive(Debug, Clone)]
 struct BasicBlock {
@@ -59,6 +59,14 @@ pub struct Conditional {
     true_block: u16,
     false_block: Option<u16>,
     join_block: u16,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LivenessInfo {
+    defs: u8,
+    uses: u8,
+    live_in: u8,
+    live_out: u8,
 }
 
 fn gen_sections(content: &str) -> (Vec<&str>, HashMap<u16, &str>) {
@@ -545,6 +553,174 @@ fn identify_conditionals(blocks: &HashMap<u16, BasicBlock>) -> Vec<Conditional> 
 
     conditionals
 }
+
+fn get_use_def(instr: &AsmInstr) -> (u8, u8) {
+    let mut uses = 0u8;
+    let mut defs = 0u8;
+
+    // For each instruction return set of registers "defined" (written) and "used" (read)
+    match instr {
+        AsmInstr::ADD(dst, src1, src2) => {
+            defs |= 1 << dst.reg_no();
+            uses |= 1 << src1.reg_no();
+            match src2 {
+                ImmOrReg::Reg(r) => uses |= 1 << r.reg_no(),
+                _ => {}
+            }
+        },
+        AsmInstr::AND(dst, src1, src2) => {
+            defs |= 1 << dst.reg_no();
+            uses |= 1 << src1.reg_no();
+            match src2 {
+                ImmOrReg::Reg(r) => uses |= 1 << r.reg_no(),
+                _ => {}
+            }
+        },
+        AsmInstr::NOT(dst, src) => {
+            defs |= 1 << dst.reg_no();
+            uses |= 1 << src.reg_no();
+        },
+        AsmInstr::LD(dst, _) => {
+            defs |= 1 << dst.reg_no();
+        },
+        AsmInstr::LDI(dst, _) => {
+            defs |= 1 << dst.reg_no();
+        },
+        AsmInstr::LDR(dst, base, _) => {
+            defs |= 1 << dst.reg_no();
+            uses |= 1 << base.reg_no();
+        },
+        AsmInstr::LEA(dst, _) => {
+            defs |= 1 << dst.reg_no();
+        },
+        AsmInstr::ST(src, _) => {
+            uses |= 1 << src.reg_no();
+        },
+        AsmInstr::STI(src, _) => {
+            uses |= 1 << src.reg_no();
+        },
+        AsmInstr::STR(src, base, _) => {
+            uses |= 1 << src.reg_no();
+            uses |= 1 << base.reg_no();
+        },
+        AsmInstr::JMP(base) => {
+            uses |= 1 << base.reg_no();
+        },
+        AsmInstr::JSR(_) => {
+            defs |= 1 << 7; // R7 is link register
+        },
+        AsmInstr::JSRR(base) => {
+            uses |= 1 << base.reg_no();
+            defs |= 1 << 7;
+        },
+        AsmInstr::RET => {
+            uses |= 1 << 7;
+        },
+        AsmInstr::TRAP(_) => {
+            defs |= 1 << 7;
+            uses |= 1 << 0;
+            defs |= 1 << 0;
+        },
+        _ => {}
+    }
+
+    (uses, defs)
+}
+
+// Phase 1: Compute the liveness information for each basic block without considering how that basic block is related to the other basic blocks
+fn compute_local_liveness(
+    blocks: &HashMap<u16, BasicBlock>, 
+    disassembly: &HashMap<u16, Stmt>
+) -> (HashMap<u16, LivenessInfo>, HashMap<u16, (u8, u8, u8, u8)>) {
+    let mut instr_liveness = HashMap::new();
+    let mut block_liveness = HashMap::new();
+
+    for (&block_addr, block) in blocks {
+        let mut block_use = 0u8;
+        let mut block_def = 0u8;
+        
+        for i in 0..block.length {
+            let addr = block_addr + i;
+            if let Some(stmt) = disassembly.get(&addr) {
+                if let StmtKind::Instr(ref instr) = stmt.nucleus {
+                    let (uses, defs) = get_use_def(instr);
+                    
+                    // Update block use/def
+                    // Use[B] |= (uses & !block_def)
+                    block_use |= uses & !block_def;
+                    // Def[B] |= defs
+                    block_def |= defs;
+                    
+                    // Store initial info for instr
+                    instr_liveness.insert(addr, LivenessInfo {
+                        defs,
+                        uses,
+                        live_in: 0,
+                        live_out: 0,
+                    });
+                }
+            }
+        }
+        
+        block_liveness.insert(block_addr, (block_use, block_def, 0, 0));
+    }
+    
+    (instr_liveness, block_liveness)
+}
+
+// Phase 2: Work on the information in each block by propagating the liveness information from each block to all the other blocks in the CFG
+fn propagate_global_liveness(
+    blocks: &HashMap<u16, BasicBlock>,
+    block_liveness: &mut HashMap<u16, (u8, u8, u8, u8)>
+) {
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let keys: Vec<u16> = blocks.keys().cloned().collect();
+        
+        for block_addr in keys {
+            let (use_b, def_b, _, _) = block_liveness[&block_addr];
+            let block = &blocks[&block_addr];
+            
+            let mut out_b = 0u8;
+            for &succ in &block.succs {
+                if let Some((_, _, in_s, _)) = block_liveness.get(&succ) {
+                    out_b |= in_s;
+                }
+            }
+            
+            let in_b = use_b | (out_b & !def_b);
+            
+            let entry = block_liveness.get_mut(&block_addr).unwrap();
+            if entry.2 != in_b || entry.3 != out_b {
+                entry.2 = in_b;
+                entry.3 = out_b;
+                changed = true;
+            }
+        }
+    }
+}
+
+// Phase 3: Add the information collected from the other blocks to each instruction present in each block
+fn compute_final_liveness(
+    blocks: &HashMap<u16, BasicBlock>,
+    block_liveness: &HashMap<u16, (u8, u8, u8, u8)>,
+    instr_liveness: &mut HashMap<u16, LivenessInfo>,
+) {
+    for (&block_addr, block) in blocks {
+        let (_, _, _, out_b) = block_liveness[&block_addr];
+        let mut current_live = out_b;
+        
+        for i in (0..block.length).rev() {
+            let addr = block_addr + i;
+            if let Some(info) = instr_liveness.get_mut(&addr) {
+                info.live_out = current_live;
+                info.live_in = info.uses | (info.live_out & !info.defs);
+                current_live = info.live_in;
+            }
+        }
+    }
+}
     
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -629,6 +805,19 @@ fn main() {
             }
         }
         println!();
+
+        // Data Flow Analysis
+        let (mut instr_liveness, mut block_liveness) = compute_local_liveness(&blocks, &disassembly);
+        propagate_global_liveness(&blocks, &mut block_liveness);
+        compute_final_liveness(&blocks, &block_liveness, &mut instr_liveness);
+
+        println!("Liveness Analysis:");
+        let mut sorted_instrs: Vec<_> = instr_liveness.iter().collect();
+        sorted_instrs.sort_by_key(|&(addr, _)| addr);
+        for (addr, info) in sorted_instrs {
+            println!("{:04X}: defs={:02X}, uses={:02X}, in={:02X}, out={:02X}", 
+                     addr, info.defs, info.uses, info.live_in, info.live_out);
+        }
+        println!();
     }
 }
-
