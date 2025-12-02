@@ -571,7 +571,20 @@ fn get_use_def(instr: &AsmInstr) -> (u8, u8) {
         },
         AsmInstr::AND(dst, src1, src2) => {
             defs |= 1 << dst.reg_no();
-            uses |= 1 << src1.reg_no();
+            
+            // We check for the edge case where AND has an immediate value of 0.
+            // In this case, the first register operand's value is completely destroyed, so this should not count as a use.
+            let mut src1_used = true;
+            if let ImmOrReg::Imm(imm) = src2 {
+                if imm.get() == 0 {
+                    src1_used = false;
+                }
+            }
+
+            if src1_used {
+                uses |= 1 << src1.reg_no();
+            }
+
             match src2 {
                 ImmOrReg::Reg(r) => uses |= 1 << r.reg_no(),
                 _ => {}
@@ -1201,6 +1214,7 @@ fn main() {
     let (text, symbols) = gen_sections(&input_obj);
     let (disassembly, origs) = disassemble(text, symbols);
 
+    // Step 1. Disassembly
     println!("Disassembly:");
     let mut sorted_entries: Vec<_> = disassembly.clone().into_iter().collect();
     sorted_entries.sort_by_key(|&(key, _)| key);
@@ -1218,8 +1232,10 @@ fn main() {
     println!();
     
     for &entry_addr in &function_list {
+        // Step 2. Split to basic blocks
         let mut blocks = create_basic_blocks(entry_addr, &disassembly);
 
+        // Step 3. Build control flow graph
         compute_dominators(&mut blocks, entry_addr);
 
         println!("Basic blocks:");
@@ -1234,6 +1250,7 @@ fn main() {
         }
         println!();
 
+        // Step 4. Control flow identification
         let mut natural_loops = compute_natural_loops(&blocks, entry_addr);
 
         println!("Natural loops:");
@@ -1272,7 +1289,7 @@ fn main() {
         }
         println!();
 
-        // Data Flow Analysis
+        // Step 5. Data Flow Analysis
         let (mut instr_liveness, mut block_liveness) = compute_local_liveness(&blocks, &disassembly);
         propagate_global_liveness(&blocks, &mut block_liveness);
         compute_final_liveness(&blocks, &block_liveness, &mut instr_liveness);
@@ -1286,7 +1303,7 @@ fn main() {
         }
         println!();
         
-        // Expression Propagation and Collapsing
+        // Step 6. Expression Propagation
         let lifted_blocks = propagate_expressions(&blocks, &disassembly, &instr_liveness);
         println!("Expressions:");
         let mut sorted_lifted: Vec<_> = lifted_blocks.iter().collect();
@@ -1297,5 +1314,14 @@ fn main() {
                 println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
             }
         }
+
+        // TODO Step 7. Expression Collapsing
+        // See CollapseExpressions.md for details
+
+        // TODO Step 8. Control Flow Structuring
+        // See Structuring.md for details
+
+        // TODO Step 9. Code Output
+        // See CodeOutput.md for details
     }
 }
