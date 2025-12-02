@@ -1,4 +1,5 @@
 use std::fs;
+use std::fmt;
 use std::collections::{HashMap, HashSet};
 use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset, Reg, ImmOrReg};
 
@@ -722,6 +723,471 @@ fn compute_final_liveness(
     }
 }
     
+#[derive(Clone)]
+enum Expr {
+    Register(u8),
+    Immediate(i16),
+    Label(String),
+    Add(Box<Expr>, Box<Expr>),
+    And(Box<Expr>, Box<Expr>),
+    Not(Box<Expr>),
+    Load(Box<Expr>), // Represents memory load from address
+}
+
+impl fmt::Debug for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expr::Register(r) => write!(f, "Register({})", r),
+            Expr::Immediate(val) => write!(f, "Immediate(0x{:X})", val),
+            Expr::Label(l) => write!(f, "Label({})", l),
+            Expr::Add(lhs, rhs) => write!(f, "Add({:?}, {:?})", lhs, rhs),
+            Expr::And(lhs, rhs) => write!(f, "And({:?}, {:?})", lhs, rhs),
+            Expr::Not(e) => write!(f, "Not({:?})", e),
+            Expr::Load(e) => write!(f, "Load({:?})", e),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum IRStmtKind {
+    Assign(u8, Expr),       // Reg = Expr
+    Store(Expr, Expr),      // Mem[Addr] = Value
+    Branch(Expr, u16),      // Condition (CC), Target
+    Call(u16),              // JSR/JSRR
+    Return,                 // RET
+    Trap(u8),               // TRAP vector
+}
+
+impl fmt::Debug for IRStmtKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IRStmtKind::Assign(reg, expr) => write!(f, "Assign({}, {:?})", reg, expr),
+            IRStmtKind::Store(addr, val) => write!(f, "Store({:?}, {:?})", addr, val),
+            IRStmtKind::Branch(cond, target) => write!(f, "Branch({:?}, 0x{:X})", cond, target),
+            IRStmtKind::Call(target) => write!(f, "Call(0x{:X})", target),
+            IRStmtKind::Return => write!(f, "Return"),
+            IRStmtKind::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct IRStmt {
+    addr: u16,
+    kind: IRStmtKind,
+}
+
+fn propagate_expressions(
+    blocks: &HashMap<u16, BasicBlock>,
+    disassembly: &HashMap<u16, Stmt>,
+    instr_liveness: &HashMap<u16, LivenessInfo>
+) -> HashMap<u16, Vec<IRStmt>> {
+    let mut lifted_blocks = HashMap::new();
+
+    for (&block_addr, block) in blocks {
+        let mut ir_stmts = Vec::new();
+        let mut pending_assignments: HashMap<u8, Expr> = HashMap::new();
+        let mut pending_order: Vec<u8> = Vec::new();
+
+        for i in 0..block.length {
+            let addr = block_addr + i;
+            if let Some(stmt) = disassembly.get(&addr) {
+                if let StmtKind::Instr(ref instr) = stmt.nucleus {
+                    let liveness = &instr_liveness[&addr];
+                    
+                    match instr {
+                        AsmInstr::ADD(dst, src1, src2) => {
+                            let dst_reg = dst.reg_no();
+                            // Don't remove dst_reg yet! It might be src1 or src2.
+                            
+                            let src1_reg = src1.reg_no();
+                            let src2_reg = match src2 {
+                                ImmOrReg::Reg(r) => Some(r.reg_no()),
+                                ImmOrReg::Imm(_) => None,
+                            };
+                            
+                            // Check for multiple uses of same register in this instruction
+                            let mut multi_use = false;
+                            if let Some(r2) = src2_reg {
+                                if r2 == src1_reg {
+                                    multi_use = true;
+                                }
+                            }
+                            
+                            let op1 = if multi_use {
+                                // Flush if pending
+                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                    pending_order.retain(|&r| r != src1_reg);
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                }
+                                Expr::Register(src1_reg)
+                            } else {
+                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                    pending_order.retain(|&r| r != src1_reg);
+                                    // Propagate if NOT live out OR defined by this instr
+                                    let killed = (liveness.defs & (1 << src1_reg)) != 0;
+                                    if killed || (liveness.live_out & (1 << src1_reg)) == 0 {
+                                        expr
+                                    } else {
+                                        ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                        Expr::Register(src1_reg)
+                                    }
+                                } else { Expr::Register(src1_reg) }
+                            };
+
+                            let op2 = match src2 {
+                                ImmOrReg::Reg(r) => {
+                                    let r_reg = r.reg_no();
+                                    // If multi_use, we already flushed src1 (which is r_reg).
+                                    // So pending is empty.
+                                    if let Some(expr) = pending_assignments.remove(&r_reg) {
+                                        pending_order.retain(|&r| r != r_reg);
+                                        let killed = (liveness.defs & (1 << r_reg)) != 0;
+                                        if killed || (liveness.live_out & (1 << r_reg)) == 0 {
+                                            expr
+                                        } else {
+                                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(r_reg, expr) });
+                                            Expr::Register(r_reg)
+                                        }
+                                    } else { Expr::Register(r_reg) }
+                                },
+                                ImmOrReg::Imm(imm) => Expr::Immediate(imm.get()),
+                            };
+                            
+                            let expr = Expr::Add(Box::new(op1), Box::new(op2));
+                            if pending_assignments.contains_key(&dst_reg) {
+                                pending_order.retain(|&r| r != dst_reg);
+                            }
+                            pending_order.push(dst_reg);
+                            pending_assignments.insert(dst_reg, expr);
+                        },
+                        AsmInstr::AND(dst, src1, src2) => {
+                            let dst_reg = dst.reg_no();
+                            
+                            let src1_reg = src1.reg_no();
+                            let src2_reg = match src2 {
+                                ImmOrReg::Reg(r) => Some(r.reg_no()),
+                                ImmOrReg::Imm(_) => None,
+                            };
+                            
+                            let mut multi_use = false;
+                            if let Some(r2) = src2_reg {
+                                if r2 == src1_reg {
+                                    multi_use = true;
+                                }
+                            }
+                            
+                            let op1 = if multi_use {
+                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                    pending_order.retain(|&r| r != src1_reg);
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                }
+                                Expr::Register(src1_reg)
+                            } else {
+                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                    pending_order.retain(|&r| r != src1_reg);
+                                    let killed = (liveness.defs & (1 << src1_reg)) != 0;
+                                    if killed || (liveness.live_out & (1 << src1_reg)) == 0 {
+                                        expr
+                                    } else {
+                                        ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                        Expr::Register(src1_reg)
+                                    }
+                                } else { Expr::Register(src1_reg) }
+                            };
+
+                            let op2 = match src2 {
+                                ImmOrReg::Reg(r) => {
+                                    let r_reg = r.reg_no();
+                                    if let Some(expr) = pending_assignments.remove(&r_reg) {
+                                        pending_order.retain(|&r| r != r_reg);
+                                        let killed = (liveness.defs & (1 << r_reg)) != 0;
+                                        if killed || (liveness.live_out & (1 << r_reg)) == 0 {
+                                            expr
+                                        } else {
+                                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(r_reg, expr) });
+                                            Expr::Register(r_reg)
+                                        }
+                                    } else { Expr::Register(r_reg) }
+                                },
+                                ImmOrReg::Imm(imm) => Expr::Immediate(imm.get()),
+                            };
+                            
+                            let expr = Expr::And(Box::new(op1), Box::new(op2));
+                            if pending_assignments.contains_key(&dst_reg) {
+                                pending_order.retain(|&r| r != dst_reg);
+                            }
+                            pending_order.push(dst_reg);
+                            pending_assignments.insert(dst_reg, expr);
+                        },
+                        AsmInstr::NOT(dst, src) => {
+                            let dst_reg = dst.reg_no();
+                            
+                            let src_reg = src.reg_no();
+                            let op1 = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                                pending_order.retain(|&r| r != src_reg);
+                                let killed = (liveness.defs & (1 << src_reg)) != 0;
+                                if killed || (liveness.live_out & (1 << src_reg)) == 0 {
+                                    expr
+                                } else {
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    Expr::Register(src_reg)
+                                }
+                            } else { Expr::Register(src_reg) };
+
+                            let expr = Expr::Not(Box::new(op1));
+                            if pending_assignments.contains_key(&dst_reg) {
+                                pending_order.retain(|&r| r != dst_reg);
+                            }
+                            pending_order.push(dst_reg);
+                            pending_assignments.insert(dst_reg, expr);
+                        },
+                        AsmInstr::LD(dst, pcoffset9) => {
+                            let dst_reg = dst.reg_no();
+                            
+                            let offset = match pcoffset9 {
+                                PCOffset::Offset(o) => o.get(),
+                                PCOffset::Label(_) => 0, 
+                            };
+                            let target_addr = (addr as i16 + 1 + offset) as u16;
+                            let expr = Expr::Load(Box::new(Expr::Immediate(target_addr as i16)));
+                             if pending_assignments.contains_key(&dst_reg) {
+                                 pending_order.retain(|&r| r != dst_reg);
+                             }
+                             pending_order.push(dst_reg);
+                             pending_assignments.insert(dst_reg, expr);
+                        },
+                        AsmInstr::LDI(dst, pcoffset9) => {
+                             let dst_reg = dst.reg_no();
+                             let offset = match pcoffset9 {
+                                PCOffset::Offset(o) => o.get(),
+                                PCOffset::Label(_) => 0, 
+                            };
+                            let target_addr = (addr as i16 + 1 + offset) as u16;
+                            let expr = Expr::Load(Box::new(Expr::Load(Box::new(Expr::Immediate(target_addr as i16)))));
+                            if pending_assignments.contains_key(&dst_reg) {
+                                pending_order.retain(|&r| r != dst_reg);
+                            }
+                            pending_order.push(dst_reg);
+                            pending_assignments.insert(dst_reg, expr);
+                        },
+                        AsmInstr::LDR(dst, base, offset6) => {
+                            let dst_reg = dst.reg_no();
+                            
+                            let base_reg = base.reg_no();
+                            let base_op = if let Some(expr) = pending_assignments.remove(&base_reg) {
+                                pending_order.retain(|&r| r != base_reg);
+                                let killed = (liveness.defs & (1 << base_reg)) != 0;
+                                if killed || (liveness.live_out & (1 << base_reg)) == 0 {
+                                    expr
+                                } else {
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(base_reg, expr) });
+                                    Expr::Register(base_reg)
+                                }
+                            } else { Expr::Register(base_reg) };
+
+                            let offset = offset6.get();
+                            
+                            let addr_expr = Expr::Add(Box::new(base_op), Box::new(Expr::Immediate(offset)));
+                            let expr = Expr::Load(Box::new(addr_expr));
+                            if pending_assignments.contains_key(&dst_reg) {
+                                pending_order.retain(|&r| r != dst_reg);
+                            }
+                            pending_order.push(dst_reg);
+                            pending_assignments.insert(dst_reg, expr);
+                        },
+                        AsmInstr::LEA(dst, pcoffset9) => {
+                            let dst_reg = dst.reg_no();
+                            
+                            let offset = match pcoffset9 {
+                                PCOffset::Offset(o) => o.get(),
+                                PCOffset::Label(_) => 0, 
+                            };
+                            let target_addr = (addr as i16 + 1 + offset) as u16;
+                            if pending_assignments.contains_key(&dst_reg) {
+                                pending_order.retain(|&r| r != dst_reg);
+                            }
+                            pending_order.push(dst_reg);
+                            pending_assignments.insert(dst_reg, Expr::Immediate(target_addr as i16));
+                        },
+                        AsmInstr::ST(src, pcoffset9) => {
+                            let src_reg = src.reg_no();
+                            let src_op = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                                pending_order.retain(|&r| r != src_reg);
+                                let killed = (liveness.defs & (1 << src_reg)) != 0;
+                                if killed || (liveness.live_out & (1 << src_reg)) == 0 {
+                                    expr
+                                } else {
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    Expr::Register(src_reg)
+                                }
+                            } else { Expr::Register(src_reg) };
+
+                            let offset = match pcoffset9 {
+                                PCOffset::Offset(o) => o.get(),
+                                PCOffset::Label(_) => 0, 
+                            };
+                            let target_addr = (addr as i16 + 1 + offset) as u16;
+                            ir_stmts.push(IRStmt {
+                                addr,
+                                kind: IRStmtKind::Store(Expr::Immediate(target_addr as i16), src_op),
+                            });
+                        },
+                        AsmInstr::STI(src, pcoffset9) => {
+                            let src_reg = src.reg_no();
+                            let src_op = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                                pending_order.retain(|&r| r != src_reg);
+                                let killed = (liveness.defs & (1 << src_reg)) != 0;
+                                if killed || (liveness.live_out & (1 << src_reg)) == 0 {
+                                    expr
+                                } else {
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    Expr::Register(src_reg)
+                                }
+                            } else { Expr::Register(src_reg) };
+
+                            let offset = match pcoffset9 {
+                                PCOffset::Offset(o) => o.get(),
+                                PCOffset::Label(_) => 0, 
+                            };
+                            let target_addr = (addr as i16 + 1 + offset) as u16;
+                            ir_stmts.push(IRStmt {
+                                addr,
+                                kind: IRStmtKind::Store(
+                                    Expr::Load(Box::new(Expr::Immediate(target_addr as i16))),
+                                    src_op
+                                ),
+                            });
+                        },
+                        AsmInstr::STR(src, base, offset6) => {
+                            let src_reg = src.reg_no();
+                            let src_op = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                                pending_order.retain(|&r| r != src_reg);
+                                let killed = (liveness.defs & (1 << src_reg)) != 0;
+                                if killed || (liveness.live_out & (1 << src_reg)) == 0 {
+                                    expr
+                                } else {
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    Expr::Register(src_reg)
+                                }
+                            } else { Expr::Register(src_reg) };
+
+                            let base_reg = base.reg_no();
+                            let base_op = if let Some(expr) = pending_assignments.remove(&base_reg) {
+                                pending_order.retain(|&r| r != base_reg);
+                                let killed = (liveness.defs & (1 << base_reg)) != 0;
+                                if killed || (liveness.live_out & (1 << base_reg)) == 0 {
+                                    expr
+                                } else {
+                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(base_reg, expr) });
+                                    Expr::Register(base_reg)
+                                }
+                            } else { Expr::Register(base_reg) };
+
+                            let offset = offset6.get();
+                            
+                            let addr_expr = Expr::Add(Box::new(base_op), Box::new(Expr::Immediate(offset)));
+                            ir_stmts.push(IRStmt {
+                                addr,
+                                kind: IRStmtKind::Store(addr_expr, src_op),
+                            });
+                        },
+                        AsmInstr::BR(cc, pcoffset9) => {
+                            // Flush all pending assignments before branching, as they might affect CC
+                            for reg in pending_order.drain(..) {
+                                if let Some(expr) = pending_assignments.remove(&reg) {
+                                    ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                }
+                            }
+
+                            let offset = match pcoffset9 {
+                                PCOffset::Offset(o) => o.get(),
+                                PCOffset::Label(_) => 0,
+                            };
+                            let target = (addr as i16 + 1 + offset) as u16;
+                            ir_stmts.push(IRStmt {
+                                addr,
+                                kind: IRStmtKind::Branch(Expr::Immediate(*cc as i16), target),
+                            });
+                        },
+                        AsmInstr::JMP(base) => {
+                             let _base_reg = base.reg_no();
+                             // Flush all pending assignments
+                             for reg in pending_order.drain(..) {
+                                 if let Some(expr) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 }
+                             }
+
+                             if base.reg_no() == 7 {
+                                 ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return });
+                             } else {
+                                 ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Trap(0xFF) });
+                             }
+                        },
+                        AsmInstr::JSR(pcoffset11) => {
+                             // Flush all pending assignments
+                             for reg in pending_order.drain(..) {
+                                 if let Some(expr) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 }
+                             }
+
+                             let offset = match pcoffset11 {
+                                PCOffset::Offset(o) => o.get(),
+                                PCOffset::Label(_) => 0,
+                            };
+                            let target = (addr as i16 + 1 + offset) as u16;
+                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(target) });
+                        },
+                        AsmInstr::JSRR(_base) => {
+                             // Flush all pending assignments
+                             for reg in pending_order.drain(..) {
+                                 if let Some(expr) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 }
+                             }
+                             ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(0) });
+                        },
+                        AsmInstr::RET => {
+                            // Flush all pending assignments
+                             for reg in pending_order.drain(..) {
+                                 if let Some(expr) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 }
+                             }
+                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return });
+                        },
+                        AsmInstr::TRAP(vect8) => {
+                            // Flush all pending assignments
+                             for reg in pending_order.drain(..) {
+                                 if let Some(expr) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 }
+                             }
+                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Trap(vect8.get() as u8) });
+                        },
+                        _ => {}
+                    }
+                }
+            }
+        }
+        
+        for reg in pending_order {
+             if let Some(expr) = pending_assignments.remove(&reg) {
+                 ir_stmts.push(IRStmt {
+                     addr: 0,
+                     kind: IRStmtKind::Assign(reg, expr),
+                 });
+             }
+        }
+        
+        lifted_blocks.insert(block_addr, ir_stmts);
+    }
+
+    lifted_blocks
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
@@ -819,5 +1285,17 @@ fn main() {
                      addr, info.defs, info.uses, info.live_in, info.live_out);
         }
         println!();
+        
+        // Expression Propagation and Collapsing
+        let lifted_blocks = propagate_expressions(&blocks, &disassembly, &instr_liveness);
+        println!("Expressions:");
+        let mut sorted_lifted: Vec<_> = lifted_blocks.iter().collect();
+        sorted_lifted.sort_by_key(|&(addr, _)| addr);
+        for (addr, stmts) in sorted_lifted {
+            println!("Block {:04X}:", addr);
+            for stmt in stmts {
+                println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+            }
+        }
     }
 }
