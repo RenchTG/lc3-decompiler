@@ -735,7 +735,7 @@ fn compute_final_liveness(
         }
     }
 }
-    
+
 #[derive(Clone)]
 enum Expr {
     Register(u8),
@@ -769,7 +769,7 @@ impl fmt::Debug for Expr {
 enum IRStmtKind {
     Assign(u8, Expr),       // Reg = Expr
     Store(Expr, Expr),      // Mem[Addr] = Value
-    Branch(Expr, u16),      // Condition (CC), Target
+    Goto(Option<Expr>, u8, u16), // Expression, Condition (CC), Target
     Call(u16),              // JSR/JSRR
     Return,                 // RET
     Trap(u8),               // TRAP vector
@@ -780,7 +780,7 @@ impl fmt::Debug for IRStmtKind {
         match self {
             IRStmtKind::Assign(reg, expr) => write!(f, "Assign({}, {:?})", reg, expr),
             IRStmtKind::Store(addr, val) => write!(f, "Store({:?}, {:?})", addr, val),
-            IRStmtKind::Branch(cond, target) => write!(f, "Branch({:?}, 0x{:X})", cond, target),
+            IRStmtKind::Goto(expr, cc, target) => write!(f, "Goto({:?}, 0x{:X}, 0x{:X})", expr, cc, target),
             IRStmtKind::Call(target) => write!(f, "Call(0x{:X})", target),
             IRStmtKind::Return => write!(f, "Return"),
             IRStmtKind::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
@@ -1124,7 +1124,7 @@ fn propagate_expressions(
                             let target = (addr as i16 + 1 + offset) as u16;
                             ir_stmts.push(IRStmt {
                                 addr,
-                                kind: IRStmtKind::Branch(Expr::Immediate(*cc as i16), target),
+                                kind: IRStmtKind::Goto(None, *cc, target),
                             });
                         },
                         AsmInstr::JMP(base) => {
@@ -1330,7 +1330,7 @@ fn collapse_stmt(stmt: &mut IRStmt) -> bool {
             if changed_val { *val = new_val; }
             changed_addr || changed_val
         },
-        IRStmtKind::Branch(cond, _) => {
+        IRStmtKind::Goto(Some(cond), _, _) => {
             let (new_cond, changed) = collapse_expr(cond.clone());
             if changed {
                 *cond = new_cond;
@@ -1356,6 +1356,91 @@ fn collapse_expressions(mut blocks: HashMap<u16, Vec<IRStmt>>) -> HashMap<u16, V
         }
     }
     blocks
+}
+
+fn apply_goto_transformation(
+    blocks: HashMap<u16, Vec<IRStmt>>,
+    instr_liveness: &HashMap<u16, LivenessInfo>
+) -> HashMap<u16, Vec<IRStmt>> {
+    let mut new_blocks = HashMap::new();
+
+    for (addr, stmts) in blocks {
+        let mut new_stmts: Vec<IRStmt> = Vec::new();
+        let mut i = 0;
+        while i < stmts.len() {
+            let stmt = &stmts[i];
+            match &stmt.kind {
+                IRStmtKind::Goto(None, cc, target) if *cc != 0 && *cc != 7 => {
+                    // Found a conditional branch that needs an expression
+                    // Look at the previous statement
+                    if let Some(last_stmt) = new_stmts.last() {
+                        if let IRStmtKind::Assign(reg, expr) = &last_stmt.kind {
+                            let reg = reg;
+                            let expr = expr.clone();
+                            
+                            // Check liveness of reg at the branch instruction
+                            // The branch instruction is 'stmt', with address 'stmt.addr'
+                            let is_live = if let Some(info) = instr_liveness.get(&stmt.addr) {
+                                (info.live_in & (1 << reg)) != 0
+                            } else {
+                                true // Assume live if unknown
+                            };
+
+                            if !is_live {
+                                // Register is dead, consume the assignment
+                                new_stmts.pop(); // Remove the Assign
+                                new_stmts.push(IRStmt {
+                                    addr: stmt.addr,
+                                    kind: IRStmtKind::Goto(Some(expr), *cc, *target),
+                                });
+                            } else {
+                                // Register is live, keep assignment, use Register in Goto
+                                new_stmts.push(IRStmt {
+                                    addr: stmt.addr,
+                                    kind: IRStmtKind::Goto(Some(Expr::Register(*reg)), *cc, *target),
+                                });
+                            }
+                        } else {
+                            // Previous statement is not an Assign (e.g. Store)
+                            // Search backwards for the last Assign
+                            let mut assign_idx = None;
+                            for (idx, s) in new_stmts.iter().enumerate().rev() {
+                                if let IRStmtKind::Assign(_, _) = s.kind {
+                                    assign_idx = Some(idx);
+                                    break;
+                                }
+                            }
+
+                            if let Some(idx) = assign_idx {
+                                if let IRStmtKind::Assign(_, _) = &new_stmts[idx].kind {
+                                     // Only merge if Assign is the *immediate* predecessor.
+                                     // If there are intervening statements, we assume we can't easily merge and just use Register(reg).
+                                     // But we still need to find which register set the CC.
+                                     // Since we can't easily know which register set CC if it's not immediate, 
+                                     // we might just leave it as None or use a heuristic.
+                                     // However, the prompt implies the Assign is "immediately before".
+                                     
+                                     new_stmts.push(stmt.clone());
+                                } else {
+                                     new_stmts.push(stmt.clone());
+                                }
+                            } else {
+                                new_stmts.push(stmt.clone());
+                            }
+                        }
+                    } else {
+                        new_stmts.push(stmt.clone());
+                    }
+                },
+                _ => {
+                    new_stmts.push(stmt.clone());
+                }
+            }
+            i += 1;
+        }
+        new_blocks.insert(addr, new_stmts);
+    }
+    new_blocks
 }
 
 fn main() {
@@ -1475,10 +1560,12 @@ fn main() {
 
         // Step 7. Expression Collapsing
         let collapsed_blocks = collapse_expressions(lifted_blocks);
+        let goto_blocks = apply_goto_transformation(collapsed_blocks, &instr_liveness);
+        
         println!("Collapsed Expressions:");
-        let mut sorted_collapsed: Vec<_> = collapsed_blocks.iter().collect();
-        sorted_collapsed.sort_by_key(|&(addr, _)| addr);
-        for (addr, stmts) in sorted_collapsed {
+        let mut sorted_gotos: Vec<_> = goto_blocks.iter().collect();
+        sorted_gotos.sort_by_key(|&(addr, _)| addr);
+        for (addr, stmts) in sorted_gotos {
             println!("Block {:04X}:", addr);
             for stmt in stmts {
                 println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
