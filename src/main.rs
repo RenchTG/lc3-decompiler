@@ -1,7 +1,7 @@
 use std::fs;
 use std::fmt;
 use std::collections::{HashMap, HashSet};
-use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset, Reg, ImmOrReg};
+use lc3_ensemble::ast::{asm::{disassemble_line, AsmInstr, Stmt, StmtKind}, Label, PCOffset, ImmOrReg};
 
 #[derive(Debug, Clone)]
 struct BasicBlock {
@@ -744,6 +744,8 @@ enum Expr {
     Add(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
+    Neg(Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
     Load(Box<Expr>), // Represents memory load from address
 }
 
@@ -756,6 +758,8 @@ impl fmt::Debug for Expr {
             Expr::Add(lhs, rhs) => write!(f, "Add({:?}, {:?})", lhs, rhs),
             Expr::And(lhs, rhs) => write!(f, "And({:?}, {:?})", lhs, rhs),
             Expr::Not(e) => write!(f, "Not({:?})", e),
+            Expr::Neg(e) => write!(f, "Neg({:?})", e),
+            Expr::Sub(lhs, rhs) => write!(f, "Sub({:?}, {:?})", lhs, rhs),
             Expr::Load(e) => write!(f, "Load({:?})", e),
         }
     }
@@ -1201,6 +1205,159 @@ fn propagate_expressions(
     lifted_blocks
 }
 
+fn collapse_expr(expr: Expr) -> (Expr, bool) {
+    match expr {
+        Expr::Register(_) | Expr::Immediate(_) | Expr::Label(_) => (expr, false),
+        Expr::Load(inner) => {
+            let (new_inner, changed) = collapse_expr(*inner);
+            (Expr::Load(Box::new(new_inner)), changed)
+        },
+        Expr::Not(inner) => {
+            let (new_inner, changed) = collapse_expr(*inner);
+            match new_inner {
+                Expr::Not(val) => (*val, true), // Not(Not(x)) -> x
+                Expr::Immediate(val) => (Expr::Immediate(!val), true), // Not(Imm) -> Imm
+                _ => (Expr::Not(Box::new(new_inner)), changed),
+            }
+        },
+        Expr::Neg(inner) => {
+            let (new_inner, changed) = collapse_expr(*inner);
+            match new_inner {
+                Expr::Neg(val) => (*val, true), // Neg(Neg(x)) -> x
+                Expr::Immediate(val) => (Expr::Immediate(-val), true), // Neg(Imm) -> Imm
+                _ => (Expr::Neg(Box::new(new_inner)), changed),
+            }
+        },
+        Expr::And(lhs, rhs) => {
+            let (new_lhs, changed_lhs) = collapse_expr(*lhs);
+            let (new_rhs, changed_rhs) = collapse_expr(*rhs);
+            let changed = changed_lhs || changed_rhs;
+            
+            match (new_lhs, new_rhs) {
+                (Expr::Immediate(0), _) | (_, Expr::Immediate(0)) => (Expr::Immediate(0), true),
+                (Expr::Immediate(-1), other) | (other, Expr::Immediate(-1)) => (other, true),
+                (Expr::Immediate(a), Expr::Immediate(b)) => (Expr::Immediate(a & b), true),
+                (lhs, rhs) => {
+                     // Check for equality (simple cases)
+                     let equal = match (&lhs, &rhs) {
+                         (Expr::Register(r1), Expr::Register(r2)) => r1 == r2,
+                         (Expr::Immediate(i1), Expr::Immediate(i2)) => i1 == i2,
+                         _ => false, // Deep equality is hard without PartialEq, assuming simple for now
+                     };
+                     if equal {
+                         (lhs, true)
+                     } else {
+                         (Expr::And(Box::new(lhs), Box::new(rhs)), changed)
+                     }
+                }
+            }
+        },
+        Expr::Add(lhs, rhs) => {
+            let (new_lhs, changed_lhs) = collapse_expr(*lhs);
+            let (new_rhs, changed_rhs) = collapse_expr(*rhs);
+            let changed = changed_lhs || changed_rhs;
+
+            match (new_lhs, new_rhs) {
+                (Expr::Immediate(0), other) | (other, Expr::Immediate(0)) => (other, true),
+                (Expr::Immediate(a), Expr::Immediate(b)) => (Expr::Immediate(a.wrapping_add(b)), true),
+                // Add(Not(x), 1) -> Neg(x)
+                (Expr::Not(inner), Expr::Immediate(1)) | (Expr::Immediate(1), Expr::Not(inner)) => {
+                    (Expr::Neg(inner), true)
+                },
+                // Add(a, Neg(b)) -> Sub(a, b)
+                (a, Expr::Neg(b)) => (Expr::Sub(Box::new(a), b), true),
+                // Add(Neg(b), a) -> Sub(a, b)
+                (Expr::Neg(b), a) => (Expr::Sub(Box::new(a), b), true),
+                // Associativity: Add(Add(a, Imm(x)), Imm(y)) -> Add(a, Imm(x+y))
+                (Expr::Add(inner_lhs, inner_rhs), Expr::Immediate(y)) => {
+                    if let Expr::Immediate(x) = *inner_rhs {
+                        (Expr::Add(inner_lhs, Box::new(Expr::Immediate(x.wrapping_add(y)))), true)
+                    } else {
+                        (Expr::Add(Box::new(Expr::Add(inner_lhs, inner_rhs)), Box::new(Expr::Immediate(y))), changed)
+                    }
+                },
+                 (Expr::Immediate(y), Expr::Add(inner_lhs, inner_rhs)) => {
+                    if let Expr::Immediate(x) = *inner_rhs {
+                         (Expr::Add(inner_lhs, Box::new(Expr::Immediate(x.wrapping_add(y)))), true)
+                    } else {
+                         (Expr::Add(Box::new(Expr::Immediate(y)), Box::new(Expr::Add(inner_lhs, inner_rhs))), changed)
+                    }
+                },
+                (lhs, rhs) => (Expr::Add(Box::new(lhs), Box::new(rhs)), changed),
+            }
+        },
+        Expr::Sub(lhs, rhs) => {
+            let (new_lhs, changed_lhs) = collapse_expr(*lhs);
+            let (new_rhs, changed_rhs) = collapse_expr(*rhs);
+            let changed = changed_lhs || changed_rhs;
+            
+            match (new_lhs, new_rhs) {
+                (a, Expr::Immediate(0)) => (a, true),
+                (Expr::Immediate(a), Expr::Immediate(b)) => (Expr::Immediate(a.wrapping_sub(b)), true),
+                 (lhs, rhs) => {
+                     // Check for equality (simple cases)
+                     let equal = match (&lhs, &rhs) {
+                         (Expr::Register(r1), Expr::Register(r2)) => r1 == r2,
+                         (Expr::Immediate(i1), Expr::Immediate(i2)) => i1 == i2,
+                         _ => false, 
+                     };
+                     if equal {
+                         (Expr::Immediate(0), true)
+                     } else {
+                         (Expr::Sub(Box::new(lhs), Box::new(rhs)), changed)
+                     }
+                }
+            }
+        }
+    }
+}
+
+fn collapse_stmt(stmt: &mut IRStmt) -> bool {
+    match &mut stmt.kind {
+        IRStmtKind::Assign(_, expr) => {
+            let (new_expr, changed) = collapse_expr(expr.clone());
+            if changed {
+                *expr = new_expr;
+                true
+            } else {
+                false
+            }
+        },
+        IRStmtKind::Store(addr, val) => {
+            let (new_addr, changed_addr) = collapse_expr(addr.clone());
+            let (new_val, changed_val) = collapse_expr(val.clone());
+            if changed_addr { *addr = new_addr; }
+            if changed_val { *val = new_val; }
+            changed_addr || changed_val
+        },
+        IRStmtKind::Branch(cond, _) => {
+            let (new_cond, changed) = collapse_expr(cond.clone());
+            if changed {
+                *cond = new_cond;
+                true
+            } else {
+                false
+            }
+        },
+        _ => false,
+    }
+}
+
+fn collapse_expressions(mut blocks: HashMap<u16, Vec<IRStmt>>) -> HashMap<u16, Vec<IRStmt>> {
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for stmts in blocks.values_mut() {
+            for stmt in stmts {
+                if collapse_stmt(stmt) {
+                    changed = true;
+                }
+            }
+        }
+    }
+    blocks
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
@@ -1314,9 +1471,20 @@ fn main() {
                 println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
             }
         }
+        println!();
 
-        // TODO Step 7. Expression Collapsing
-        // See CollapseExpressions.md for details
+        // Step 7. Expression Collapsing
+        let collapsed_blocks = collapse_expressions(lifted_blocks);
+        println!("Collapsed Expressions:");
+        let mut sorted_collapsed: Vec<_> = collapsed_blocks.iter().collect();
+        sorted_collapsed.sort_by_key(|&(addr, _)| addr);
+        for (addr, stmts) in sorted_collapsed {
+            println!("Block {:04X}:", addr);
+            for stmt in stmts {
+                println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+            }
+        }
+        println!();
 
         // TODO Step 8. Control Flow Structuring
         // See Structuring.md for details
