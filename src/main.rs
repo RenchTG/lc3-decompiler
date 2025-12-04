@@ -773,6 +773,10 @@ enum IRStmtKind {
     Call(u16),              // JSR/JSRR
     Return,                 // RET
     Trap(u8),               // TRAP vector
+    DoWhile(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
+    If(Option<Expr>, u8, Vec<IRStmt>, Option<Vec<IRStmt>>),
+    Break,
+    Continue,
 }
 
 impl fmt::Debug for IRStmtKind {
@@ -784,6 +788,35 @@ impl fmt::Debug for IRStmtKind {
             IRStmtKind::Call(target) => write!(f, "Call(0x{:X})", target),
             IRStmtKind::Return => write!(f, "Return"),
             IRStmtKind::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
+            IRStmtKind::DoWhile(cond, cc, body) => {
+                write!(f, "DoWhile({:?}, 0x{:X}, {{", cond, cc)?;
+                let mut sorted_body: Vec<_> = body.iter().collect();
+                sorted_body.sort_by_key(|&(addr, _)| addr);
+                for (addr, stmts) in sorted_body {
+                    write!(f, "\n  Block {:04X}:", addr)?;
+                    for stmt in stmts {
+                        write!(f, "\n    {:?}", stmt.kind)?;
+                    }
+                }
+                write!(f, "\n}})")
+            },
+            IRStmtKind::If(cond, cc, true_branch, false_branch) => {
+                write!(f, "If({:?}, 0x{:X}, {{", cond, cc)?;
+                for stmt in true_branch {
+                    write!(f, "\n    {:?}", stmt.kind)?;
+                }
+                write!(f, "\n  }}")?;
+                if let Some(false_branch) = false_branch {
+                    write!(f, " else {{")?;
+                    for stmt in false_branch {
+                        write!(f, "\n    {:?}", stmt.kind)?;
+                    }
+                    write!(f, "\n  }}")?;
+                }
+                write!(f, ")")
+            },
+            IRStmtKind::Break => write!(f, "Break"),
+            IRStmtKind::Continue => write!(f, "Continue"),
         }
     }
 }
@@ -1443,6 +1476,105 @@ fn apply_goto_transformation(
     new_blocks
 }
 
+fn structure_loops(
+    goto_blocks: &mut HashMap<u16, Vec<IRStmt>>, 
+    loops: &Vec<Loop>, 
+    blocks: &HashMap<u16, BasicBlock>
+) {
+    // Sort loops from innermost loop to outermost loop
+    // We already did this in identify_loops, but let's be safe or rely on the order passed in.
+    // The `loops` vector passed here comes from `identify_loops` which sorts by size.
+    
+    for loop_info in loops {
+        let header = loop_info.header;
+        let break_block = loop_info.break_block;
+        let continue_block = loop_info.continue_block;
+        
+        // Extract Loop Body
+        let mut loop_body: HashMap<u16, Vec<IRStmt>> = HashMap::new();
+        for &block_addr in &loop_info.blocks {
+            if let Some(stmts) = goto_blocks.remove(&block_addr) {
+                loop_body.insert(block_addr, stmts);
+            }
+        }
+        
+        // Identify Loop Condition
+        let mut condition: Option<Expr> = None;
+        let mut condition_cc: u8 = 0;
+        
+        if let Some(break_addr) = break_block {
+             // Find the jump to break_block
+             for stmts in loop_body.values() {
+                 for stmt in stmts {
+                     if let IRStmtKind::Goto(expr, cc, target) = &stmt.kind {
+                         if *target == break_addr {
+                             // This is an exit edge.
+                             // The condition for the loop to CONTINUE is the negation of this.
+                             // We preserve the expression and negate the CC.
+                             
+                             if let Some(e) = expr {
+                                 condition = Some(e.clone());
+                                 // Negate CC: (!cc) & 7
+                                 // CC is 3 bits: N(4), Z(2), P(1)
+                                 condition_cc = (!cc) & 7;
+                             }
+                         }
+                     }
+                 }
+             }
+        }
+
+        // Apply Break/Continue
+        for stmts in loop_body.values_mut() {
+            for stmt in stmts.iter_mut() {
+                if let IRStmtKind::Goto(expr, cc, target) = &stmt.kind {
+                    let target_is_break = Some(*target) == break_block;
+                    // Only jump to header is a Continue (back-edge)
+                    // Jumps to continue_block should remain as Goto to ensure latch code is executed
+                    let target_is_continue = *target == header;
+                    
+                    if target_is_break || target_is_continue {
+                        let new_kind = if target_is_break { IRStmtKind::Break } else { IRStmtKind::Continue };
+                        
+                        if *cc == 7 {
+                            // Unconditional
+                            stmt.kind = new_kind;
+                        } else {
+                            // Conditional - wrap in If
+                            // If(expr, cc, vec![Break/Continue], None)
+                            stmt.kind = IRStmtKind::If(
+                                expr.clone(),
+                                *cc,
+                                vec![IRStmt { addr: stmt.addr, kind: new_kind }],
+                                None
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Remove redundant Continue at the end of continue_block
+        if let Some(cont_addr) = continue_block {
+            if let Some(stmts) = loop_body.get_mut(&cont_addr) {
+                if let Some(last_stmt) = stmts.last() {
+                    if let IRStmtKind::Continue = last_stmt.kind {
+                        stmts.pop();
+                    }
+                }
+            }
+        }
+        
+        // Create DoWhile Statement
+        let do_while_stmt = IRStmt {
+            addr: header,
+            kind: IRStmtKind::DoWhile(condition, condition_cc, loop_body),
+        };
+        
+        goto_blocks.insert(header, vec![do_while_stmt]);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
@@ -1560,7 +1692,7 @@ fn main() {
 
         // Step 7. Expression Collapsing
         let collapsed_blocks = collapse_expressions(lifted_blocks);
-        let goto_blocks = apply_goto_transformation(collapsed_blocks, &instr_liveness);
+        let mut goto_blocks = apply_goto_transformation(collapsed_blocks, &instr_liveness);
         
         println!("Collapsed Expressions:");
         let mut sorted_gotos: Vec<_> = goto_blocks.iter().collect();
@@ -1573,8 +1705,19 @@ fn main() {
         }
         println!();
 
-        // TODO Step 8. Control Flow Structuring
-        // See Structuring.md for details
+        // Step 8. Control Flow Structuring
+        structure_loops(&mut goto_blocks, &identified_loops, &blocks);
+
+        println!("Structured Loops:");
+        let mut sorted_structured: Vec<_> = goto_blocks.iter().collect();
+        sorted_structured.sort_by_key(|&(addr, _)| addr);
+        for (addr, stmts) in sorted_structured {
+            println!("Block {:04X}:", addr);
+            for stmt in stmts {
+                println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+            }
+        }
+        println!();
 
         // TODO Step 9. Code Output
         // See CodeOutput.md for details
