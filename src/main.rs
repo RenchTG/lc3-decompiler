@@ -774,6 +774,8 @@ enum IRStmtKind {
     Return,                 // RET
     Trap(u8),               // TRAP vector
     DoWhile(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
+    While(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
+    For(Box<IRStmt>, Option<Expr>, u8, Box<IRStmt>, HashMap<u16, Vec<IRStmt>>),
     If(Option<Expr>, u8, Vec<IRStmt>, Option<Vec<IRStmt>>),
     Break,
     Continue,
@@ -790,6 +792,30 @@ impl fmt::Debug for IRStmtKind {
             IRStmtKind::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
             IRStmtKind::DoWhile(cond, cc, body) => {
                 write!(f, "DoWhile({:?}, 0x{:X}, {{", cond, cc)?;
+                let mut sorted_body: Vec<_> = body.iter().collect();
+                sorted_body.sort_by_key(|&(addr, _)| addr);
+                for (addr, stmts) in sorted_body {
+                    write!(f, "\n  Block {:04X}:", addr)?;
+                    for stmt in stmts {
+                        write!(f, "\n    {:?}", stmt.kind)?;
+                    }
+                }
+                write!(f, "\n}})")
+            },
+            IRStmtKind::While(cond, cc, body) => {
+                write!(f, "While({:?}, 0x{:X}, {{", cond, cc)?;
+                let mut sorted_body: Vec<_> = body.iter().collect();
+                sorted_body.sort_by_key(|&(addr, _)| addr);
+                for (addr, stmts) in sorted_body {
+                    write!(f, "\n  Block {:04X}:", addr)?;
+                    for stmt in stmts {
+                        write!(f, "\n    {:?}", stmt.kind)?;
+                    }
+                }
+                write!(f, "\n}})")
+            },
+            IRStmtKind::For(init, cond, cc, incr, body) => {
+                write!(f, "For({:?}, {:?}, 0x{:X}, {:?}, {{", init.kind, cond, cc, incr.kind)?;
                 let mut sorted_body: Vec<_> = body.iter().collect();
                 sorted_body.sort_by_key(|&(addr, _)| addr);
                 for (addr, stmts) in sorted_body {
@@ -836,7 +862,7 @@ fn propagate_expressions(
 
     for (&block_addr, block) in blocks {
         let mut ir_stmts = Vec::new();
-        let mut pending_assignments: HashMap<u8, Expr> = HashMap::new();
+        let mut pending_assignments: HashMap<u8, (Expr, u16)> = HashMap::new();
         let mut pending_order: Vec<u8> = Vec::new();
 
         for i in 0..block.length {
@@ -866,20 +892,20 @@ fn propagate_expressions(
                             
                             let op1 = if multi_use {
                                 // Flush if pending
-                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
                                     pending_order.retain(|&r| r != src1_reg);
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
                                 }
                                 Expr::Register(src1_reg)
                             } else {
-                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
                                     pending_order.retain(|&r| r != src1_reg);
                                     // Propagate if NOT live out OR defined by this instr
                                     let killed = (liveness.defs & (1 << src1_reg)) != 0;
                                     if killed || (liveness.live_out & (1 << src1_reg)) == 0 {
                                         expr
                                     } else {
-                                        ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                        ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
                                         Expr::Register(src1_reg)
                                     }
                                 } else { Expr::Register(src1_reg) }
@@ -890,13 +916,13 @@ fn propagate_expressions(
                                     let r_reg = r.reg_no();
                                     // If multi_use, we already flushed src1 (which is r_reg).
                                     // So pending is empty.
-                                    if let Some(expr) = pending_assignments.remove(&r_reg) {
+                                    if let Some((expr, stmt_addr)) = pending_assignments.remove(&r_reg) {
                                         pending_order.retain(|&r| r != r_reg);
                                         let killed = (liveness.defs & (1 << r_reg)) != 0;
                                         if killed || (liveness.live_out & (1 << r_reg)) == 0 {
                                             expr
                                         } else {
-                                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(r_reg, expr) });
+                                            ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(r_reg, expr) });
                                             Expr::Register(r_reg)
                                         }
                                     } else { Expr::Register(r_reg) }
@@ -909,7 +935,7 @@ fn propagate_expressions(
                                 pending_order.retain(|&r| r != dst_reg);
                             }
                             pending_order.push(dst_reg);
-                            pending_assignments.insert(dst_reg, expr);
+                            pending_assignments.insert(dst_reg, (expr, addr));
                         },
                         AsmInstr::AND(dst, src1, src2) => {
                             let dst_reg = dst.reg_no();
@@ -928,19 +954,19 @@ fn propagate_expressions(
                             }
                             
                             let op1 = if multi_use {
-                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
                                     pending_order.retain(|&r| r != src1_reg);
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
                                 }
                                 Expr::Register(src1_reg)
                             } else {
-                                if let Some(expr) = pending_assignments.remove(&src1_reg) {
+                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
                                     pending_order.retain(|&r| r != src1_reg);
                                     let killed = (liveness.defs & (1 << src1_reg)) != 0;
                                     if killed || (liveness.live_out & (1 << src1_reg)) == 0 {
                                         expr
                                     } else {
-                                        ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                        ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
                                         Expr::Register(src1_reg)
                                     }
                                 } else { Expr::Register(src1_reg) }
@@ -949,13 +975,13 @@ fn propagate_expressions(
                             let op2 = match src2 {
                                 ImmOrReg::Reg(r) => {
                                     let r_reg = r.reg_no();
-                                    if let Some(expr) = pending_assignments.remove(&r_reg) {
+                                    if let Some((expr, stmt_addr)) = pending_assignments.remove(&r_reg) {
                                         pending_order.retain(|&r| r != r_reg);
                                         let killed = (liveness.defs & (1 << r_reg)) != 0;
                                         if killed || (liveness.live_out & (1 << r_reg)) == 0 {
                                             expr
                                         } else {
-                                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(r_reg, expr) });
+                                            ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(r_reg, expr) });
                                             Expr::Register(r_reg)
                                         }
                                     } else { Expr::Register(r_reg) }
@@ -968,19 +994,19 @@ fn propagate_expressions(
                                 pending_order.retain(|&r| r != dst_reg);
                             }
                             pending_order.push(dst_reg);
-                            pending_assignments.insert(dst_reg, expr);
+                            pending_assignments.insert(dst_reg, (expr, addr));
                         },
                         AsmInstr::NOT(dst, src) => {
                             let dst_reg = dst.reg_no();
                             
                             let src_reg = src.reg_no();
-                            let op1 = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                            let op1 = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
                                 pending_order.retain(|&r| r != src_reg);
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
                                     expr
                                 } else {
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
@@ -990,7 +1016,7 @@ fn propagate_expressions(
                                 pending_order.retain(|&r| r != dst_reg);
                             }
                             pending_order.push(dst_reg);
-                            pending_assignments.insert(dst_reg, expr);
+                            pending_assignments.insert(dst_reg, (expr, addr));
                         },
                         AsmInstr::LD(dst, pcoffset9) => {
                             let dst_reg = dst.reg_no();
@@ -1005,7 +1031,7 @@ fn propagate_expressions(
                                  pending_order.retain(|&r| r != dst_reg);
                              }
                              pending_order.push(dst_reg);
-                             pending_assignments.insert(dst_reg, expr);
+                             pending_assignments.insert(dst_reg, (expr, addr));
                         },
                         AsmInstr::LDI(dst, pcoffset9) => {
                              let dst_reg = dst.reg_no();
@@ -1019,19 +1045,19 @@ fn propagate_expressions(
                                 pending_order.retain(|&r| r != dst_reg);
                             }
                             pending_order.push(dst_reg);
-                            pending_assignments.insert(dst_reg, expr);
+                            pending_assignments.insert(dst_reg, (expr, addr));
                         },
                         AsmInstr::LDR(dst, base, offset6) => {
                             let dst_reg = dst.reg_no();
                             
                             let base_reg = base.reg_no();
-                            let base_op = if let Some(expr) = pending_assignments.remove(&base_reg) {
+                            let base_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&base_reg) {
                                 pending_order.retain(|&r| r != base_reg);
                                 let killed = (liveness.defs & (1 << base_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << base_reg)) == 0 {
                                     expr
                                 } else {
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(base_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(base_reg, expr) });
                                     Expr::Register(base_reg)
                                 }
                             } else { Expr::Register(base_reg) };
@@ -1044,7 +1070,7 @@ fn propagate_expressions(
                                 pending_order.retain(|&r| r != dst_reg);
                             }
                             pending_order.push(dst_reg);
-                            pending_assignments.insert(dst_reg, expr);
+                            pending_assignments.insert(dst_reg, (expr, addr));
                         },
                         AsmInstr::LEA(dst, pcoffset9) => {
                             let dst_reg = dst.reg_no();
@@ -1058,17 +1084,17 @@ fn propagate_expressions(
                                 pending_order.retain(|&r| r != dst_reg);
                             }
                             pending_order.push(dst_reg);
-                            pending_assignments.insert(dst_reg, Expr::Immediate(target_addr as i16));
+                            pending_assignments.insert(dst_reg, (Expr::Immediate(target_addr as i16), addr));
                         },
                         AsmInstr::ST(src, pcoffset9) => {
                             let src_reg = src.reg_no();
-                            let src_op = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                            let src_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
                                 pending_order.retain(|&r| r != src_reg);
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
                                     expr
                                 } else {
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
@@ -1085,13 +1111,13 @@ fn propagate_expressions(
                         },
                         AsmInstr::STI(src, pcoffset9) => {
                             let src_reg = src.reg_no();
-                            let src_op = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                            let src_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
                                 pending_order.retain(|&r| r != src_reg);
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
                                     expr
                                 } else {
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
@@ -1111,25 +1137,25 @@ fn propagate_expressions(
                         },
                         AsmInstr::STR(src, base, offset6) => {
                             let src_reg = src.reg_no();
-                            let src_op = if let Some(expr) = pending_assignments.remove(&src_reg) {
+                            let src_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
                                 pending_order.retain(|&r| r != src_reg);
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
                                     expr
                                 } else {
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
 
                             let base_reg = base.reg_no();
-                            let base_op = if let Some(expr) = pending_assignments.remove(&base_reg) {
+                            let base_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&base_reg) {
                                 pending_order.retain(|&r| r != base_reg);
                                 let killed = (liveness.defs & (1 << base_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << base_reg)) == 0 {
                                     expr
                                 } else {
-                                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(base_reg, expr) });
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(base_reg, expr) });
                                     Expr::Register(base_reg)
                                 }
                             } else { Expr::Register(base_reg) };
@@ -1145,8 +1171,8 @@ fn propagate_expressions(
                         AsmInstr::BR(cc, pcoffset9) => {
                             // Flush all pending assignments before branching, as they might affect CC
                             for reg in pending_order.drain(..) {
-                                if let Some(expr) = pending_assignments.remove(&reg) {
-                                    ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
+                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                 }
                             }
 
@@ -1164,8 +1190,8 @@ fn propagate_expressions(
                              let _base_reg = base.reg_no();
                              // Flush all pending assignments
                              for reg in pending_order.drain(..) {
-                                 if let Some(expr) = pending_assignments.remove(&reg) {
-                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
 
@@ -1178,8 +1204,8 @@ fn propagate_expressions(
                         AsmInstr::JSR(pcoffset11) => {
                              // Flush all pending assignments
                              for reg in pending_order.drain(..) {
-                                 if let Some(expr) = pending_assignments.remove(&reg) {
-                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
 
@@ -1193,8 +1219,8 @@ fn propagate_expressions(
                         AsmInstr::JSRR(_base) => {
                              // Flush all pending assignments
                              for reg in pending_order.drain(..) {
-                                 if let Some(expr) = pending_assignments.remove(&reg) {
-                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
                              ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(0) });
@@ -1202,8 +1228,8 @@ fn propagate_expressions(
                         AsmInstr::RET => {
                             // Flush all pending assignments
                              for reg in pending_order.drain(..) {
-                                 if let Some(expr) = pending_assignments.remove(&reg) {
-                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
                             ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return });
@@ -1211,8 +1237,8 @@ fn propagate_expressions(
                         AsmInstr::TRAP(vect8) => {
                             // Flush all pending assignments
                              for reg in pending_order.drain(..) {
-                                 if let Some(expr) = pending_assignments.remove(&reg) {
-                                     ir_stmts.push(IRStmt { addr: 0, kind: IRStmtKind::Assign(reg, expr) });
+                                 if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
+                                     ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
                             ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Trap(vect8.get() as u8) });
@@ -1224,9 +1250,9 @@ fn propagate_expressions(
         }
         
         for reg in pending_order {
-             if let Some(expr) = pending_assignments.remove(&reg) {
+             if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
                  ir_stmts.push(IRStmt {
-                     addr: 0,
+                     addr: stmt_addr,
                      kind: IRStmtKind::Assign(reg, expr),
                  });
              }
@@ -1479,7 +1505,8 @@ fn apply_goto_transformation(
 fn structure_loops(
     goto_blocks: &mut HashMap<u16, Vec<IRStmt>>, 
     loops: &Vec<Loop>, 
-    blocks: &HashMap<u16, BasicBlock>
+    blocks: &HashMap<u16, BasicBlock>,
+    conditionals: &Vec<Conditional>
 ) {
     // Sort loops from innermost loop to outermost loop
     // We already did this in identify_loops, but let's be safe or rely on the order passed in.
@@ -1525,7 +1552,10 @@ fn structure_loops(
         }
 
         // Apply Break/Continue
-        for stmts in loop_body.values_mut() {
+        for (block_addr, stmts) in loop_body.iter_mut() {
+            // Check if this block is a condition block for any conditional
+            let is_condition_block = conditionals.iter().any(|c| c.condition_block == *block_addr);
+
             for stmt in stmts.iter_mut() {
                 if let IRStmtKind::Goto(expr, cc, target) = &stmt.kind {
                     let target_is_break = Some(*target) == break_block;
@@ -1533,7 +1563,7 @@ fn structure_loops(
                     // Jumps to continue_block should remain as Goto to ensure latch code is executed
                     let target_is_continue = *target == header;
                     
-                    if target_is_break || target_is_continue {
+                    if (target_is_break || target_is_continue) && !is_condition_block {
                         let new_kind = if target_is_break { IRStmtKind::Break } else { IRStmtKind::Continue };
                         
                         if *cc == 7 {
@@ -1572,6 +1602,217 @@ fn structure_loops(
         };
         
         goto_blocks.insert(header, vec![do_while_stmt]);
+    }
+}
+
+fn refine_loops(
+    goto_blocks: &mut HashMap<u16, Vec<IRStmt>>,
+    identified_loops: &Vec<Loop>,
+    blocks: &HashMap<u16, BasicBlock>,
+    conditionals: &Vec<Conditional>
+) {
+    // 1. DoWhile -> While
+    let mut keys: Vec<u16> = goto_blocks.keys().cloned().collect();
+    let mut init_removals: Vec<(u16, u16)> = Vec::new(); // (block_addr, stmt_addr)
+
+    for key in keys.clone() { // Clone keys for the second loop as well
+        if let Some(stmts) = goto_blocks.get_mut(&key) {
+            if stmts.len() == 1 {
+                let header_addr = stmts[0].addr;
+                let stmt = &mut stmts[0];
+                if let IRStmtKind::DoWhile(_, _, ref mut body) = stmt.kind {
+                     let mut converted_to_while = false;
+                     let mut new_while_cond = None;
+                     let mut new_while_cc = 0;
+                     
+                     if let Some(entry_stmts) = body.get(&header_addr) {
+                        if let Some(first_stmt) = entry_stmts.first() {
+                            if let IRStmtKind::If(ref if_cond, ref if_cc, ref true_branch, ref false_branch) = first_stmt.kind {
+                                if true_branch.len() == 1 && matches!(true_branch[0].kind, IRStmtKind::Break) && false_branch.is_none() {
+                                    new_while_cond = if_cond.clone();
+                                    new_while_cc = (!if_cc) & 7;
+                                    converted_to_while = true;
+                                }
+                            }
+                        }
+                     }
+                     
+                     if converted_to_while {
+                         // Remove the If statement
+                         if let Some(entry_stmts) = body.get_mut(&header_addr) {
+                             entry_stmts.remove(0);
+                         }
+                         stmt.kind = IRStmtKind::While(new_while_cond, new_while_cc, body.clone());
+                     }
+                }
+            }
+        }
+    }
+    
+    // Pre-calculate last assignments for While -> For conversion
+    let mut last_assignments: HashMap<u16, HashMap<u8, IRStmt>> = HashMap::new();
+    for (addr, stmts) in goto_blocks.iter() {
+        let mut block_assigns = HashMap::new();
+        for stmt in stmts {
+            if let IRStmtKind::Assign(r, _) = stmt.kind {
+                block_assigns.insert(r, stmt.clone());
+            }
+        }
+        last_assignments.insert(*addr, block_assigns);
+    }
+    
+    // 2. While -> For
+    // The `keys` variable is already defined and cloned from the previous section.
+    for key in keys {
+        if let Some(stmts) = goto_blocks.get_mut(&key) {
+            if stmts.len() == 1 {
+                let header_addr = stmts[0].addr;
+                let stmt = &mut stmts[0];
+                // We need to match by reference to avoid moving fields out of the struct
+                // except for 'cc' which is Copy, but we can't move 'cond' and 'body' partially.
+                // So we match everything by reference.
+                if let IRStmtKind::While(ref cond, ref cc, ref mut body) = stmt.kind {
+                    
+                    // Identify init_stmt in predecessor
+                    let mut loop_var = None;
+                    
+                    // Remove box syntax
+                    if let Some(expr) = cond {
+                        match expr {
+                            Expr::Sub(lhs, _) => {
+                                if let Expr::Register(r) = **lhs {
+                                    loop_var = Some(r);
+                                }
+                            },
+                            Expr::Register(r) => {
+                                loop_var = Some(*r);
+                            },
+                            _ => {}
+                        }
+                        
+                        // Check for Sub(_, box Expr::Register(r)) case if needed
+                        if loop_var.is_none() {
+                             if let Expr::Sub(_, rhs) = expr {
+                                 if let Expr::Register(r) = **rhs {
+                                     loop_var = Some(r);
+                                 }
+                             }
+                        }
+                    }
+                    
+                    if let Some(var) = loop_var {
+                        // Check predecessors for assignment to 'var'
+                        let mut init_stmt: Option<IRStmt> = None;
+                        let mut potential_init_removal = None;
+
+                        if let Some(block) = blocks.get(&header_addr) {
+                            for pred in &block.preds {
+                                if !body.contains_key(pred) {
+                                    if let Some(assigns) = last_assignments.get(pred) {
+                                        if let Some(s) = assigns.get(&var) {
+                                            init_stmt = Some(s.clone());
+                                            potential_init_removal = Some((*pred, s.addr));
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Identify incr_stmt in loop body
+                        let mut incr_stmt: Option<IRStmt> = None;
+                        let mut continue_block_addr = None;
+                        
+                        // Find the loop info
+                        if let Some(loop_info) = identified_loops.iter().find(|l| l.header == header_addr) {
+                            if let Some(cont_addr) = loop_info.continue_block {
+                                if let Some(stmts) = body.get(&cont_addr) {
+                                    continue_block_addr = Some(cont_addr);
+                                    
+                                    // Check last statement or second to last
+                                    if let Some(last) = stmts.last() {
+                                        let is_terminator = matches!(last.kind, IRStmtKind::Continue | IRStmtKind::Goto(_, _, _) | IRStmtKind::Break | IRStmtKind::Return | IRStmtKind::Trap(_));
+                                        
+                                        let potential_incr = if is_terminator {
+                                            if stmts.len() >= 2 { Some(&stmts[stmts.len() - 2]) } else { None }
+                                        } else {
+                                            Some(last)
+                                        };
+                                        
+                                        if let Some(stmt) = potential_incr {
+                                            if let IRStmtKind::Assign(r, _) = stmt.kind {
+                                                if r == var {
+                                                    incr_stmt = Some(stmt.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if let (Some(init), Some(incr), Some(cont_addr)) = (init_stmt, incr_stmt, continue_block_addr) {
+                            // Found both! Convert to For loop.
+                            if let Some(removal) = potential_init_removal {
+                                init_removals.push(removal);
+                            }
+                            
+                             if let Some(stmts) = body.get_mut(&cont_addr) {
+                                 // Remove the increment
+                                 // We need to know if it was last or second to last.
+                                 // Re-check to be safe or store index.
+                                 let is_terminator = if let Some(last) = stmts.last() {
+                                     matches!(last.kind, IRStmtKind::Continue | IRStmtKind::Goto(_, _, _) | IRStmtKind::Break | IRStmtKind::Return | IRStmtKind::Trap(_))
+                                 } else { false };
+                                 
+                                 if is_terminator {
+                                     if stmts.len() >= 2 { stmts.remove(stmts.len() - 2); }
+                                 } else {
+                                     stmts.pop();
+                                 }
+                                 
+                                 // If we have a terminator that jumps to header, convert to Continue
+                                 // If we have no terminator, we don't need to add Continue because For loop implies it?
+                                 // Wait, For loop body executes, then Incr, then Check.
+                                 // If we fall through body, we go to Incr.
+                                 // So we don't need explicit Continue if we fell through.
+                                 
+                                 if let Some(last) = stmts.last_mut() {
+                                      if let IRStmtKind::Goto(_, _, target) = last.kind {
+                                         if target == header_addr {
+                                             last.kind = IRStmtKind::Continue;
+                                         }
+                                     }
+                                 }
+                             }
+                             
+                             for (block_addr, stmts) in body.iter_mut() {
+                                 let is_condition_block = conditionals.iter().any(|c| c.condition_block == *block_addr);
+                                 for s in stmts.iter_mut() {
+                                     if let IRStmtKind::Goto(_, _, target) = s.kind {
+                                         if target == cont_addr && !is_condition_block {
+                                             s.kind = IRStmtKind::Continue;
+                                         }
+                                     }
+                                 }
+                             }
+                             
+                             // cc is &u8 here because of ref cc match
+                             stmt.kind = IRStmtKind::For(Box::new(init), cond.clone(), *cc, Box::new(incr), body.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Remove redundant initialization statements
+    for (block_addr, stmt_addr) in init_removals {
+        if let Some(stmts) = goto_blocks.get_mut(&block_addr) {
+            if let Some(pos) = stmts.iter().position(|s| s.addr == stmt_addr) {
+                stmts.remove(pos);
+            }
+        }
     }
 }
 
@@ -1706,7 +1947,8 @@ fn main() {
         println!();
 
         // Step 8. Control Flow Structuring
-        structure_loops(&mut goto_blocks, &identified_loops, &blocks);
+        structure_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
+        refine_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
 
         println!("Structured Loops:");
         let mut sorted_structured: Vec<_> = goto_blocks.iter().collect();
