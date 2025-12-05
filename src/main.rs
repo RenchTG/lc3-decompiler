@@ -1816,6 +1816,157 @@ fn refine_loops(
     }
 }
 
+
+
+fn structure_conditionals(
+    blocks: &mut HashMap<u16, Vec<IRStmt>>,
+    conditionals: &Vec<Conditional>
+) {
+    // 1. Recurse into Loop bodies
+    for stmts in blocks.values_mut() {
+        for stmt in stmts.iter_mut() {
+            match &mut stmt.kind {
+                IRStmtKind::DoWhile(_, _, body) |
+                IRStmtKind::While(_, _, body) |
+                IRStmtKind::For(_, _, _, _, body) => {
+                    structure_conditionals(body, conditionals);
+                },
+                _ => {}
+            }
+        }
+    }
+
+    // 2. Identify Applicable Conditionals
+    // A conditional is applicable if its condition_block is in our `blocks` map.
+    let mut applicable_indices: Vec<usize> = Vec::new();
+    for (i, cond) in conditionals.iter().enumerate() {
+        if blocks.contains_key(&cond.condition_block) {
+            applicable_indices.push(i);
+        }
+    }
+
+    // 3. Sort Conditionals by Dependency
+    applicable_indices.sort_by(|&i_a, &i_b| {
+        let a = &conditionals[i_a];
+        let b = &conditionals[i_b];
+        
+        // A depends on B if A "contains" B in its branches.
+        // Practically, if A branches to B, B is inner (or following).
+        // If B is inside A, B must be structured first so A can absorb it.
+        // A point to B if A.true == B.cond or A.false == B.cond
+        
+        let a_points_to_b = a.true_block == b.condition_block || 
+                            a.false_block.map_or(false, |fb| fb == b.condition_block);
+        
+        let b_points_to_a = b.true_block == a.condition_block || 
+                            b.false_block.map_or(false, |fb| fb == a.condition_block);
+                            
+        if a_points_to_b {
+            std::cmp::Ordering::Greater // B comes before A
+        } else if b_points_to_a {
+            std::cmp::Ordering::Less // A comes before B
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    });
+
+    // 4. Apply Structuring
+    for idx in applicable_indices {
+        let cond = &conditionals[idx];
+        
+        // Check existence without borrowing mutably yet
+        if !blocks.contains_key(&cond.condition_block) {
+            continue;
+        }
+
+        // 1. Snapshot the required info from the condition block
+        let (expr_opt, cc, target_addr, stmt_addr) = {
+             let stmts = &blocks[&cond.condition_block];
+             if let Some(last) = stmts.last() {
+                 if let IRStmtKind::Goto(expr, cc, target) = &last.kind {
+                     (expr.clone(), *cc, *target, last.addr)
+                 } else {
+                     continue; // Should not happen if well-formed, or already structured?
+                 }
+             } else {
+                 continue;
+             }
+        };
+        
+        // 2. We now need `expr` from `expr_opt`. If it's None, we can't really structure it as If?
+        // But Goto(None, ...) is unconditional. Conditionals usually have Some(expr).
+        // If it is None, it's not a conditional? AsmInstr::BR with cc != 7 checks CC.
+        // But `propagate_expressions` puts None if it couldn't find an expression.
+        // We probably should handle None by just using CC check on registers?
+        // But the previous code assumed Some(expr).
+        
+        if let Some(expr) = expr_opt {
+            let mut final_cond = expr;
+            let mut final_cc = cc;
+            
+            let mut true_stmts = Vec::new();
+            let mut false_stmts = None;
+            
+            // 3. Mutate blocks (Remove branches)
+            match cond.kind {
+                ConditionalType::IfElse => {
+                    if let Some(mut stmts) = blocks.remove(&cond.true_block) {
+                         if let Some(last) = stmts.last() {
+                            if let IRStmtKind::Goto(_, _, t) = last.kind {
+                                if t == cond.join_block {
+                                    stmts.pop();
+                                }
+                            }
+                        }
+                        true_stmts = stmts;
+                    }
+                    
+                    if let Some(fb) = cond.false_block {
+                        if let Some(mut stmts) = blocks.remove(&fb) {
+                             if let Some(last) = stmts.last() {
+                                if let IRStmtKind::Goto(_, _, t) = last.kind {
+                                    if t == cond.join_block {
+                                        stmts.pop();
+                                    }
+                                }
+                            }
+                            false_stmts = Some(stmts);
+                        }
+                    }
+                },
+                ConditionalType::If => {
+                    if let Some(mut stmts) = blocks.remove(&cond.true_block) {
+                         if let Some(last) = stmts.last() {
+                            if let IRStmtKind::Goto(_, _, t) = last.kind {
+                                if t == cond.join_block {
+                                    stmts.pop();
+                                }
+                            }
+                        }
+                        true_stmts = stmts;
+                    }
+                    
+                    if target_addr == cond.join_block {
+                         final_cc = (!final_cc) & 7;
+                    }
+                }
+            }
+            
+            // 4. Update the condition block
+            if let Some(stmts) = blocks.get_mut(&cond.condition_block) {
+                 let if_stmt = IRStmt {
+                    addr: stmt_addr, 
+                    kind: IRStmtKind::If(Some(final_cond), final_cc, true_stmts, false_stmts),
+                };
+                
+                // We assume it's still the last statement
+                let last_idx = stmts.len() - 1;
+                stmts[last_idx] = if_stmt;
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
@@ -1948,9 +2099,10 @@ fn main() {
 
         // Step 8. Control Flow Structuring
         structure_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
+        structure_conditionals(&mut goto_blocks, &identified_conditionals);
         refine_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
 
-        println!("Structured Loops:");
+        println!("Structured Control Flow:");
         let mut sorted_structured: Vec<_> = goto_blocks.iter().collect();
         sorted_structured.sort_by_key(|&(addr, _)| addr);
         for (addr, stmts) in sorted_structured {
