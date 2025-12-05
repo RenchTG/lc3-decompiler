@@ -117,14 +117,47 @@ fn disassemble(text: Vec<&str>, symbols: HashMap<u16, &str>) -> (HashMap<u16, St
 fn identify_code_data(disassembly: HashMap<u16, Stmt>, _origs: Vec<u16>) -> Vec<u16> {
     let mut call_list: Vec<u16> = vec![0x3000];
     let mut function_list: Vec<u16> = Vec::new();
+    // work_list scans the current function's blocks
     let mut work_list: Vec<u16> = Vec::new();
+    let mut visited: HashSet<u16> = HashSet::new();
 
     while !call_list.is_empty() {
         let mut addr = call_list.pop().unwrap();
+        
+        // If we've already visited this address (as an entry point or code), we might skip pushing to function list?
+        // But function_list tracks *entry points*.
+        // Only push if it's a new function entry.
+        // But for now, let's just avoid re-scanning code.
+        if visited.contains(&addr) {
+            continue;
+        }
         function_list.push(addr);
 
         loop {
-            let stmt = &disassembly[&addr];
+            // Check visited
+            if visited.contains(&addr) {
+                 if let Some(next) = work_list.pop() {
+                     addr = next;
+                     continue;
+                 } else {
+                     break;
+                 }
+            }
+            visited.insert(addr);
+
+            // Get statement
+            let stmt = match disassembly.get(&addr) {
+                Some(s) => s,
+                None => {
+                     // Hit non-code.
+                     if let Some(next) = work_list.pop() {
+                         addr = next;
+                         continue;
+                     } else {
+                         break;
+                     }
+                }
+            };
 
             match &stmt.nucleus {
                 // Instruction is jump
@@ -145,25 +178,43 @@ fn identify_code_data(disassembly: HashMap<u16, Stmt>, _origs: Vec<u16>) -> Vec<
                 },
                 // Instruction is ret
                 StmtKind::Instr(AsmInstr::RET) => {
-                    if work_list.is_empty() {
+                    if let Some(next_addr) = work_list.pop() {
+                        addr = next_addr;
+                        continue;
+                    } else {
                         break;
                     }
                 },
-                // Instruction is unconditional jump/call
+                // Instruction is unconditional jump
                 StmtKind::Instr(AsmInstr::JMP(_reg)) => {
-                    addr = work_list.pop().unwrap();
-                    continue;
+                    // Treat as terminator
+                    if let Some(next_addr) = work_list.pop() {
+                        addr = next_addr;
+                        continue;
+                    } else {
+                        break;
+                    }
                 },
+                // Instruction is call to register
                 StmtKind::Instr(AsmInstr::JSRR(_reg)) => {
-                    addr = work_list.pop().unwrap();
-                    continue;
+                    // Assume returns, fallthrough
                 },
-                // If halt or directive, guaranteed end of function
+                // If halt or directive, guaranteed end of path
                 StmtKind::Instr(AsmInstr::HALT) => {
-                    break;
+                    if let Some(next_addr) = work_list.pop() {
+                        addr = next_addr;
+                        continue;
+                    } else {
+                        break;
+                    }
                 },
                 StmtKind::Directive(_) => {
-                    break;
+                    if let Some(next_addr) = work_list.pop() {
+                        addr = next_addr;
+                        continue;
+                    } else {
+                        break;
+                    }
                 },
                 _ => {
                     // Any other instruction falls through to increment
@@ -770,7 +821,7 @@ enum IRStmtKind {
     Assign(u8, Expr),       // Reg = Expr
     Store(Expr, Expr),      // Mem[Addr] = Value
     Goto(Option<Expr>, u8, u16), // Expression, Condition (CC), Target
-    Call(u16),              // JSR/JSRR
+    Call(Expr),             // JSR/JSRR
     Return,                 // RET
     Trap(u8),               // TRAP vector
     DoWhile(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
@@ -787,7 +838,7 @@ impl fmt::Debug for IRStmtKind {
             IRStmtKind::Assign(reg, expr) => write!(f, "Assign({}, {:?})", reg, expr),
             IRStmtKind::Store(addr, val) => write!(f, "Store({:?}, {:?})", addr, val),
             IRStmtKind::Goto(expr, cc, target) => write!(f, "Goto({:?}, 0x{:X}, 0x{:X})", expr, cc, target),
-            IRStmtKind::Call(target) => write!(f, "Call(0x{:X})", target),
+            IRStmtKind::Call(target) => write!(f, "Call({:?})", target),
             IRStmtKind::Return => write!(f, "Return"),
             IRStmtKind::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
             IRStmtKind::DoWhile(cond, cc, body) => {
@@ -1213,17 +1264,20 @@ fn propagate_expressions(
                                 PCOffset::Offset(o) => o.get(),
                                 PCOffset::Label(_) => 0,
                             };
-                            let target = (addr as i16 + 1 + offset) as u16;
-                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(target) });
+                             let target = (addr as i16 + 1 + offset) as u16;
+                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(Expr::Immediate(target as i16)) });
                         },
-                        AsmInstr::JSRR(_base) => {
+                        AsmInstr::JSRR(base) => {
                              // Flush all pending assignments
                              for reg in pending_order.drain(..) {
                                  if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
                                      ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
-                             ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(0) });
+                             
+                             let src_reg = base.reg_no();
+                             // We currently don't fold pending assignments into JSRR base to be safe.
+                             ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(Expr::Register(src_reg)) });
                         },
                         AsmInstr::RET => {
                             // Flush all pending assignments
@@ -1972,7 +2026,7 @@ enum LinearStmt {
     Assign(u8, Expr),
     Store(Expr, Expr),
     Goto(Option<Expr>, u8, u16),
-    Call(u16),
+    Call(Expr),
     Return,
     Trap(u8),
     DoWhile(Option<Expr>, u8, Vec<LinearStmt>),
@@ -1990,7 +2044,7 @@ impl fmt::Debug for LinearStmt {
             LinearStmt::Assign(reg, expr) => write!(f, "Assign({}, {:?})", reg, expr),
             LinearStmt::Store(addr, val) => write!(f, "Store({:?}, {:?})", addr, val),
             LinearStmt::Goto(expr, cc, target) => write!(f, "Goto({:?}, 0x{:X}, 0x{:X})", expr, cc, target),
-            LinearStmt::Call(target) => write!(f, "Call(0x{:X})", target),
+            LinearStmt::Call(target) => write!(f, "Call({:?})", target),
             LinearStmt::Return => write!(f, "Return"),
             LinearStmt::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
             LinearStmt::DoWhile(cond, cc, body) => {
@@ -2065,7 +2119,7 @@ fn to_linear_stmt(stmt: &IRStmt, targets: &HashSet<u16>) -> LinearStmt {
         IRStmtKind::Assign(r, e) => LinearStmt::Assign(*r, e.clone()),
         IRStmtKind::Store(a, v) => LinearStmt::Store(a.clone(), v.clone()),
         IRStmtKind::Goto(e, cc, t) => LinearStmt::Goto(e.clone(), *cc, *t),
-        IRStmtKind::Call(t) => LinearStmt::Call(*t),
+        IRStmtKind::Call(target) => LinearStmt::Call(target.clone()),
         IRStmtKind::Return => LinearStmt::Return,
         IRStmtKind::Trap(v) => LinearStmt::Trap(*v),
         IRStmtKind::DoWhile(cond, cc, body) => {
@@ -2294,11 +2348,18 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
                  format!("{}if ({}) goto {};", spaces, cond_str, target_str)
              }
         },
-        LinearStmt::Call(target) => {
-             if let Some(name) = symbols.get(target) {
-                 format!("{}call {}();", spaces, name)
+        LinearStmt::Call(expr) => {
+             // Check if it's an immediate (direct call) or expression (indirect call)
+             if let Expr::Immediate(addr) = expr {
+                 let addr_u16 = *addr as u16;
+                  if let Some(name) = symbols.get(&addr_u16) {
+                      format!("{}call {}();", spaces, name)
+                  } else {
+                      format!("{}call func_{:04X}();", spaces, addr_u16)
+                  }
              } else {
-                 format!("{}call func_{:04X}();", spaces, target)
+                 // Indirect call
+                 format!("{}call {}();", spaces, stringify_expr(expr, symbols))
              }
         },
         LinearStmt::Return => format!("{}return;", spaces),
@@ -2407,7 +2468,7 @@ fn main() {
     }
     
     let mut debug_mode = false;
-    let mut entry_point_arg = 0x3000;
+    let mut entry_request: Option<String> = None;
     
     let mut i = 2;
     while i < args.len() {
@@ -2418,9 +2479,7 @@ fn main() {
             },
             "-e" | "--entry" => {
                 if i + 1 < args.len() {
-                    let addr_str = &args[i+1];
-                    let addr_clean = addr_str.trim_start_matches("0x").trim_start_matches("x");
-                    entry_point_arg = u16::from_str_radix(addr_clean, 16).expect("Invalid entry address");
+                    entry_request = Some(args[i+1].clone());
                     i += 2;
                 } else {
                     eprintln!("Missing address for --entry");
@@ -2460,8 +2519,34 @@ fn main() {
         }
         println!();
     }
+    
     // Process the requested entry point
-    let entry_addr = entry_point_arg;
+    let entry_addr = if let Some(req) = entry_request {
+         // Try parsing as hex first
+         let clean = req.trim_start_matches("0x").trim_start_matches("x");
+         if let Ok(addr) = u16::from_str_radix(clean, 16) {
+             addr
+         } else {
+             // Try symbol lookup
+             let mut found_addr = None;
+             for (addr, name) in &symbols {
+                 if name == &req {
+                     found_addr = Some(*addr);
+                     break;
+                 }
+             }
+             
+             if let Some(addr) = found_addr {
+                 addr
+             } else {
+                 eprintln!("Error: Could not resolve entry point '{}' as address or label.", req);
+                 std::process::exit(1);
+             }
+         }
+    } else {
+        0x3000
+    };
+
     {
         println!("Decompiling function at {:04X}", entry_addr);
         
@@ -2613,4 +2698,3 @@ fn main() {
         println!("{}", code);
     }
 }
-
