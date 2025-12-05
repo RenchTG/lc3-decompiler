@@ -2123,6 +2123,282 @@ fn linearize(blocks: &HashMap<u16, Vec<IRStmt>>) -> Vec<LinearStmt> {
     linearize_blocks(blocks, &targets)
 }
 
+fn stringify_expr(expr: &Expr, symbols: &HashMap<u16, &str>) -> String {
+    match expr {
+        Expr::Register(r) => format!("var{}", r),
+        Expr::Immediate(val) => format!("{}", val),
+        Expr::Label(l) => l.clone(),
+        Expr::Add(lhs, rhs) => format!("{} + {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
+        Expr::Sub(lhs, rhs) => format!("{} - {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
+        Expr::And(lhs, rhs) => format!("{} & {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
+        Expr::Not(e) => format!("~{}", stringify_expr(e, symbols)),
+        Expr::Neg(e) => format!("-{}", stringify_expr(e, symbols)),
+        Expr::Load(e) => {
+            if let Expr::Immediate(addr) = **e {
+                let addr_u16 = addr as u16;
+                if let Some(name) = symbols.get(&addr_u16) {
+                    // Try to resolve global var
+                    // If label name is same as address (default) or special?
+                    // Gen sections creates "L{addr}" or meaningful names?
+                    // Let's assume meaningful.
+                    if (*name).starts_with("LC-3 OBJ FILE") {
+                         format!("*global_{:04X}", addr_u16)
+                    } else {
+                         // Dereference valid pointer unless it's just a label?
+                         // "Load" means memory access.
+                         // But if immediate is an address of a variable, Load(Imm) is reading that variable.
+                         // So `*LABEL` is correct if LABEL is a pointer.
+                         // But `LD R0, LABEL` loads value at LABEL.
+                         // `LDI R0, LABEL` loads value at address stored at LABEL.
+                         // My IR:
+                         // LD R0, LABEL -> Assign(0, Load(Immediate(Addr)))
+                         // So Load(Imm) -> *Addr.
+                         // If Addr has name 'FOO', then *FOO.
+                         format!("*{}", name)
+                    }
+                } else {
+                    format!("*global_{:04X}", addr_u16)
+                }
+            } else {
+                // If expression, like base + offset
+                // LDR R0, R1, #1 -> Assign(0, Load(Add(Reg(1), Imm(1))))
+                // -> *(var1 + 1)
+                format!("*({})", stringify_expr(e, symbols))
+            }
+        },
+    }
+}
+
+// Convert CC bitmask to logical operation condition string
+fn stringify_cc(cc: u8) -> String {
+    match cc {
+        0 => "false".to_string(),
+        1 => "> 0".to_string(),
+        2 => "== 0".to_string(), // Zero
+        3 => ">= 0".to_string(),
+        4 => "< 0".to_string(),
+        5 => "!= 0".to_string(),
+        6 => "<= 0".to_string(),
+        7 => "true".to_string(),
+        _ => "true".to_string(),
+    }
+}
+
+fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize) -> String {
+    let spaces = " ".repeat(indent * 4);
+    match stmt {
+        LinearStmt::Assign(reg, expr) => {
+            let mut handled = false;
+            let mut result = String::new();
+            
+            // Check for var++ (var = var + 1) or var-- (var = var - 1)
+            if let Expr::Add(lhs, rhs) = expr {
+                 // Check var = var + 1
+                 if let (Expr::Register(r), Expr::Immediate(1)) = (&**lhs, &**rhs) {
+                     if *r == *reg {
+                         result = format!("{}var{}++;", spaces, reg);
+                         handled = true;
+                     }
+                 } else if let (Expr::Immediate(1), Expr::Register(r)) = (&**lhs, &**rhs) {
+                     if *r == *reg {
+                         result = format!("{}var{}++;", spaces, reg);
+                         handled = true;
+                     }
+                 } 
+                 // Check var = var + -1 (common in LC3 ADD R0, R0, #-1)
+                 else if let (Expr::Register(r), Expr::Immediate(-1)) = (&**lhs, &**rhs) {
+                     if *r == *reg {
+                         result = format!("{}var{}--;", spaces, reg);
+                         handled = true;
+                     }
+                 } else if let (Expr::Immediate(-1), Expr::Register(r)) = (&**lhs, &**rhs) {
+                     if *r == *reg {
+                         result = format!("{}var{}--;", spaces, reg);
+                         handled = true;
+                     }
+                 }
+            } else if let Expr::Sub(lhs, rhs) = expr {
+                // Check var = var - 1
+                if let (Expr::Register(r), Expr::Immediate(1)) = (&**lhs, &**rhs) {
+                    if *r == *reg {
+                        result = format!("{}var{}--;", spaces, reg);
+                        handled = true;
+                    }
+                }
+            }
+
+            if handled {
+                result
+            } else {
+                format!("{}var{} = {};", spaces, reg, stringify_expr(expr, symbols))
+            }
+        },
+        LinearStmt::Store(addr, val) => {
+            // Store(Addr, Val) -> *Addr = Val
+            // Check if addr is Load of something? No, Store takes address directly.
+            // STR R0, R1, #0 -> Store(Add(Reg(1), Imm(0)), Reg(0)) -> *(var1 + 0) = var0
+            // STI R0, LABEL -> Store(Load(Imm(Addr)), Reg(0)) 
+            // Wait, STI uses indirect addressing. STI R0, LABEL -> mem[mem[PC + offset]] = R0.
+            // My IR for STI: Store(Load(Immediate(Target)), Register(0))?
+            // Yes, because STI writes TO the address stored at Target.
+            // If addr is just Immediate(X), then it's directly writing to X? (ST instruction)
+            
+            // `stringify_expr(addr)` will handle the `*` if it's a Load.
+            // If `addr` is Immediate, `stringify` gives `X`. `Store` implies dereference of LHS if it's an address.
+            // But C semantics: `*ptr = val`. 
+            // `stringify_expr` of `Add` is `lhs + rhs`.
+            // So `*(lhs + rhs) = val`.
+            
+            // If `addr` expr is Load(Imm), `stringify` returns `*Imm`.
+            // So `*(*Imm) = val`. This matches STI (double indirection).
+            
+            // If `addr` expr is Imm, `stringify` returns `Imm`.
+            // So `*(Imm) = val`. This matches ST implementation?
+            // Actually, `Store(A, B)` means `Memory[A] = B`.
+            // So we always wrap `A` in `*()`?
+            
+            // My `stringify_expr` handles `Load` by adding `*`.
+            // So `Load` already adds one star.
+            // `Store` target is an address. We need to write to that address.
+            // So `*Target = Value`.
+            
+            // Let's refine `addr_str`.
+            let addr_str = stringify_expr(addr, symbols);
+            // If addr_str already starts with `*`, it's like `**X`.
+            // But verify: Store(Load(Imm)) -> *(*Imm) = ...
+            // If Store(Imm) -> *Imm = ...
+            // Yes, we always dereference the address we are storing to.
+            
+            // However, verify if `addr` needs wrapping in parens.
+            if matches!(addr, Expr::Add(_, _) | Expr::Sub(_, _)) {
+                 format!("{}*({}) = {};", spaces, addr_str, stringify_expr(val, symbols))
+            } else {
+                 format!("{}*{} = {};", spaces, addr_str, stringify_expr(val, symbols))
+            }
+        },
+        LinearStmt::Goto(cond, cc, target) => {
+             let target_str = if let Some(name) = symbols.get(target) {
+                 name.to_string()
+             } else {
+                 format!("global_{:04X}", target)
+             };
+             
+             if *cc == 7 {
+                 format!("{}goto {};", spaces, target_str)
+             } else {
+                 let cond_str = if let Some(expr) = cond {
+                     format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+                 } else {
+                     "true".to_string()
+                 };
+                 format!("{}if ({}) goto {};", spaces, cond_str, target_str)
+             }
+        },
+        LinearStmt::Call(target) => {
+             if let Some(name) = symbols.get(target) {
+                 format!("{}call {}();", spaces, name)
+             } else {
+                 format!("{}call func_{:04X}();", spaces, target)
+             }
+        },
+        LinearStmt::Return => format!("{}return;", spaces),
+        LinearStmt::Trap(v) => format!("{}trap(0x{:X});", spaces, v),
+        LinearStmt::DoWhile(cond, cc, body) => {
+             let mut s = format!("{}do {{\n", spaces);
+             for child in body {
+                 s.push_str(&stringify_stmt(child, symbols, indent + 1));
+                 s.push('\n');
+             }
+             let cond_str = if let Some(expr) = cond {
+                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+             } else {
+                 "true".to_string()
+             };
+             s.push_str(&format!("{}}} while ({});", spaces, cond_str));
+             s
+        },
+        LinearStmt::While(cond, cc, body) => {
+             let cond_str = if let Some(expr) = cond {
+                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+             } else {
+                 "true".to_string()
+             };
+             let mut s = format!("{}while ({}) {{\n", spaces, cond_str);
+             for child in body {
+                 s.push_str(&stringify_stmt(child, symbols, indent + 1));
+                 s.push('\n');
+             }
+             s.push_str(&format!("{}}}", spaces));
+             s
+        },
+        LinearStmt::For(init, cond, cc, incr, body) => {
+             // Extract init str (remove trailing semicolon)
+             // Since init is Box<LinearStmt>, we can just call stringify_stmt and trim.
+             let init_str = stringify_stmt(init, symbols, 0).trim().trim_end_matches(';').to_string();
+             
+             let incr_str = stringify_stmt(incr, symbols, 0).trim().trim_end_matches(';').to_string();
+             
+             let cond_str = if let Some(expr) = cond {
+                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+             } else {
+                 "true".to_string()
+             };
+             
+             let mut s = format!("{}for ({}; {}; {}) {{\n", spaces, init_str, cond_str, incr_str);
+             
+
+             for child in body {
+                 s.push_str(&stringify_stmt(child, symbols, indent + 1));
+                 s.push('\n');
+             }
+             s.push_str(&format!("{}}}", spaces));
+             s
+        },
+        LinearStmt::If(cond, cc, true_branch, false_branch) => {
+             let cond_str = if let Some(expr) = cond {
+                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+             } else {
+                 "true".to_string()
+             };
+             
+             let mut s = format!("{}if ({}) {{\n", spaces, cond_str);
+             for child in true_branch {
+                 s.push_str(&stringify_stmt(child, symbols, indent + 1));
+                 s.push('\n');
+             }
+             s.push_str(&format!("{}}}", spaces));
+             
+             if let Some(false_stmts) = false_branch {
+                 s.push_str(" else {\n");
+                 for child in false_stmts {
+                     s.push_str(&stringify_stmt(child, symbols, indent + 1));
+                     s.push('\n');
+                 }
+                 s.push_str(&format!("{}}}", spaces));
+             }
+             s
+        },
+        LinearStmt::Break => format!("{}break;", spaces),
+        LinearStmt::Continue => format!("{}continue;", spaces),
+        LinearStmt::Label(addr) => {
+             if let Some(name) = symbols.get(addr) {
+                 format!("{}:", name)
+             } else {
+                 format!("global_{:04X}:", addr)
+             }
+        },
+    }
+}
+
+fn generate_code(stmts: &Vec<LinearStmt>, symbols: &HashMap<u16, &str>) -> String {
+    let mut output = String::new();
+    for stmt in stmts {
+        output.push_str(&stringify_stmt(stmt, symbols, 0));
+        output.push('\n');
+    }
+    output
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 2 {
@@ -2134,7 +2410,7 @@ fn main() {
     assert!(input_obj.starts_with("LC-3 OBJ FILE"));
 
     let (text, symbols) = gen_sections(&input_obj);
-    let (disassembly, origs) = disassemble(text, symbols);
+    let (disassembly, origs) = disassemble(text, symbols.clone());
 
     // Step 1. Disassembly
     println!("Disassembly:");
@@ -2272,11 +2548,14 @@ fn main() {
         // Step 9. Linearization
         println!("Linearized Code:");
         let linear_code = linearize(&goto_blocks);
-        for stmt in linear_code {
+        for stmt in &linear_code {
             println!("{:?}", stmt);
         }
         println!();
 
-        // Step 10. Code Output and Global Symbol Resolution
+        // Step 10. Code Output and Symbol Resolution
+        println!("Generated C-Like Code:");
+        let code = generate_code(&linear_code, &symbols);
+        println!("{}", code);
     }
 }
