@@ -740,7 +740,7 @@ fn compute_final_liveness(
 enum Expr {
     Register(u8),
     Immediate(i16),
-    Label(String),
+
     Add(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
@@ -754,7 +754,7 @@ impl fmt::Debug for Expr {
         match self {
             Expr::Register(r) => write!(f, "Register({})", r),
             Expr::Immediate(val) => write!(f, "Immediate(0x{:X})", val),
-            Expr::Label(l) => write!(f, "Label({})", l),
+
             Expr::Add(lhs, rhs) => write!(f, "Add({:?}, {:?})", lhs, rhs),
             Expr::And(lhs, rhs) => write!(f, "And({:?}, {:?})", lhs, rhs),
             Expr::Not(e) => write!(f, "Not({:?})", e),
@@ -1266,7 +1266,7 @@ fn propagate_expressions(
 
 fn collapse_expr(expr: Expr) -> (Expr, bool) {
     match expr {
-        Expr::Register(_) | Expr::Immediate(_) | Expr::Label(_) => (expr, false),
+        Expr::Register(_) | Expr::Immediate(_) => (expr, false),
         Expr::Load(inner) => {
             let (new_inner, changed) = collapse_expr(*inner);
             (Expr::Load(Box::new(new_inner)), changed)
@@ -1505,7 +1505,7 @@ fn apply_goto_transformation(
 fn structure_loops(
     goto_blocks: &mut HashMap<u16, Vec<IRStmt>>, 
     loops: &Vec<Loop>, 
-    blocks: &HashMap<u16, BasicBlock>,
+    _blocks: &HashMap<u16, BasicBlock>,
     conditionals: &Vec<Conditional>
 ) {
     // Sort loops from innermost loop to outermost loop
@@ -1612,7 +1612,7 @@ fn refine_loops(
     conditionals: &Vec<Conditional>
 ) {
     // 1. DoWhile -> While
-    let mut keys: Vec<u16> = goto_blocks.keys().cloned().collect();
+    let keys: Vec<u16> = goto_blocks.keys().cloned().collect();
     let mut init_removals: Vec<(u16, u16)> = Vec::new(); // (block_addr, stmt_addr)
 
     for key in keys.clone() { // Clone keys for the second loop as well
@@ -1901,7 +1901,7 @@ fn structure_conditionals(
         // But the previous code assumed Some(expr).
         
         if let Some(expr) = expr_opt {
-            let mut final_cond = expr;
+            let final_cond = expr;
             let mut final_cc = cc;
             
             let mut true_stmts = Vec::new();
@@ -2127,7 +2127,7 @@ fn stringify_expr(expr: &Expr, symbols: &HashMap<u16, &str>) -> String {
     match expr {
         Expr::Register(r) => format!("var{}", r),
         Expr::Immediate(val) => format!("{}", val),
-        Expr::Label(l) => l.clone(),
+
         Expr::Add(lhs, rhs) => format!("{} + {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
         Expr::Sub(lhs, rhs) => format!("{} - {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
         Expr::And(lhs, rhs) => format!("{} & {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
@@ -2401,9 +2401,37 @@ fn generate_code(stmts: &Vec<LinearStmt>, symbols: &HashMap<u16, &str>) -> Strin
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <path to obj file>", args[0]);
+    if args.len() < 2 {
+        eprintln!("Usage: {} <path to obj file> [-d|--debug] [-e|--entry <addr>]", args[0]);
         std::process::exit(1);
+    }
+    
+    let mut debug_mode = false;
+    let mut entry_point_arg = 0x3000;
+    
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-d" | "--debug" => {
+                debug_mode = true;
+                i += 1;
+            },
+            "-e" | "--entry" => {
+                if i + 1 < args.len() {
+                    let addr_str = &args[i+1];
+                    let addr_clean = addr_str.trim_start_matches("0x").trim_start_matches("x");
+                    entry_point_arg = u16::from_str_radix(addr_clean, 16).expect("Invalid entry address");
+                    i += 2;
+                } else {
+                    eprintln!("Missing address for --entry");
+                    std::process::exit(1);
+                }
+            },
+            _ => {
+                // Ignore unknown args or warn?
+                i += 1;
+            }
+        }
     }
 
     let input_obj = fs::read_to_string(args[1].clone()).expect("Failed to read file");
@@ -2413,149 +2441,176 @@ fn main() {
     let (disassembly, origs) = disassemble(text, symbols.clone());
 
     // Step 1. Disassembly
-    println!("Disassembly:");
-    let mut sorted_entries: Vec<_> = disassembly.clone().into_iter().collect();
-    sorted_entries.sort_by_key(|&(key, _)| key);
-    for (addr, stmt) in sorted_entries {
-        println!("{:04X}: {}", addr, stmt);
+    if debug_mode {
+        println!("Disassembly:");
+        let mut sorted_entries: Vec<_> = disassembly.clone().into_iter().collect();
+        sorted_entries.sort_by_key(|&(key, _)| key);
+        for (addr, stmt) in sorted_entries {
+            println!("{:04X}: {}", addr, stmt);
+        }
+        println!();
     }
-    println!();
 
     let function_list = identify_code_data(disassembly.clone(), origs);
 
-    println!("Identified functions:");
-    for addr in &function_list {
-        println!("{:04X}", addr);
+    if debug_mode {
+        println!("Identified functions:");
+        for addr in &function_list {
+            println!("{:04X}", addr);
+        }
+        println!();
     }
-    println!();
-    
-    for &entry_addr in &function_list {
+    // Process the requested entry point
+    let entry_addr = entry_point_arg;
+    {
+        println!("Decompiling function at {:04X}", entry_addr);
+        
         // Step 2. Split to basic blocks
         let mut blocks = create_basic_blocks(entry_addr, &disassembly);
 
         // Step 3. Build control flow graph
         compute_dominators(&mut blocks, entry_addr);
 
-        println!("Basic blocks:");
-        let mut sorted_blocks: Vec<_> = blocks.iter().collect();
-        sorted_blocks.sort_by_key(|&(addr, _)| addr);
-        for (addr, block) in sorted_blocks {
-            let preds: Vec<String> = block.preds.iter().map(|&p| format!("{:04X}", p)).collect();
-            let succs: Vec<String> = block.succs.iter().map(|&s| format!("{:04X}", s)).collect();
-            let dominators: Vec<String> = block.dominators.iter().map(|&d| format!("{:04X}", d)).collect();
-            println!("Block at {:04X}: length = {}, preds = [{}], succs = [{}], dominators = [{}]",
-                     addr, block.length, preds.join(", "), succs.join(", "), dominators.join(", "));
+        if debug_mode {
+            println!("Basic blocks:");
+            let mut sorted_blocks: Vec<_> = blocks.iter().collect();
+            sorted_blocks.sort_by_key(|&(addr, _)| addr);
+            for (addr, block) in sorted_blocks {
+                let preds: Vec<String> = block.preds.iter().map(|&p| format!("{:04X}", p)).collect();
+                let succs: Vec<String> = block.succs.iter().map(|&s| format!("{:04X}", s)).collect();
+                let dominators: Vec<String> = block.dominators.iter().map(|&d| format!("{:04X}", d)).collect();
+                println!("Block at {:04X}: length = {}, preds = [{}], succs = [{}], dominators = [{}]",
+                         addr, block.length, preds.join(", "), succs.join(", "), dominators.join(", "));
+            }
+            println!();
         }
-        println!();
 
         // Step 4. Control flow identification
         let mut natural_loops = compute_natural_loops(&blocks, entry_addr);
 
-        println!("Natural loops:");
-        for (i, loop_obj) in natural_loops.iter().enumerate() {
-            let loop_blocks: Vec<String> = loop_obj.blocks.iter().map(|&b| format!("{:04X}", b)).collect();
-            println!("Loop {}: header = {:04X}, blocks = [{}]", 
-                     i + 1, loop_obj.header, loop_blocks.join(", "));
+        if debug_mode {
+            println!("Natural loops:");
+            for (id, l) in natural_loops.iter().enumerate() {
+                let block_strs: Vec<String> = l.blocks.iter().map(|&b| format!("{:04X}", b)).collect();
+                println!("Loop {}: header = {:04X}, blocks = [{}]", id + 1, l.header, block_strs.join(", "));
+            }
+            println!();
         }
-        println!();
 
         let identified_loops = identify_loops(&mut natural_loops, &blocks);
         let identified_conditionals = identify_conditionals(&blocks);
 
-        println!("Identified Loop Structures:");
-        for (i, loop_info) in identified_loops.iter().enumerate() {
-            let loop_blocks: Vec<String> = loop_info.blocks.iter().map(|&b| format!("{:04X}", b)).collect();
-            println!("Loop {}: header = {:04X}, blocks = [{}], break_block = {:?}, continue_block = {:?}",
-                     i + 1, loop_info.header, loop_blocks.join(", "), 
-                     loop_info.break_block.map(|b| format!("{:04X}", b)), 
-                     loop_info.continue_block.map(|b| format!("{:04X}", b)));
-        }
-        println!();
+        if debug_mode {
+            println!("Identified Loop Structures:");
+            for (i, loop_info) in identified_loops.iter().enumerate() {
+                let loop_blocks: Vec<String> = loop_info.blocks.iter().map(|&b| format!("{:04X}", b)).collect();
+                println!("Loop {}: header = {:04X}, blocks = [{}], break_block = {:?}, continue_block = {:?}",
+                         i + 1, loop_info.header, loop_blocks.join(", "), 
+                         loop_info.break_block.map(|b| format!("{:04X}", b)), 
+                         loop_info.continue_block.map(|b| format!("{:04X}", b)));
+            }
+            println!();
 
-        println!("Identified Conditional Structures:");
-        for (i, cond) in identified_conditionals.iter().enumerate() {
-            match cond.kind {
-                ConditionalType::If => {
-                    println!("Conditional {} (If): condition_block = {:04X}, true_branch = {:04X}, join_block = {:04X}",
-                             i + 1, cond.condition_block, cond.true_block, cond.join_block);
-                }
-                ConditionalType::IfElse => {
-                    println!("Conditional {} (If-Else): condition_block = {:04X}, true_branch = {:04X}, false_branch = {:04X}, join_block = {:04X}",
-                             i + 1, cond.condition_block, cond.true_block, cond.false_block.unwrap(), cond.join_block);
+            println!("Identified Conditional Structures:");
+            for (i, cond) in identified_conditionals.iter().enumerate() {
+                match cond.kind {
+                    ConditionalType::If => {
+                        println!("Conditional {} (If): condition_block = {:04X}, true_branch = {:04X}, join_block = {:04X}",
+                                 i + 1, cond.condition_block, cond.true_block, cond.join_block);
+                    }
+                    ConditionalType::IfElse => {
+                        println!("Conditional {} (If-Else): condition_block = {:04X}, true_branch = {:04X}, false_branch = {:04X}, join_block = {:04X}",
+                                 i + 1, cond.condition_block, cond.true_block, cond.false_block.unwrap(), cond.join_block);
+                    }
                 }
             }
+            println!();
         }
-        println!();
 
         // Step 5. Data Flow Analysis
         let (mut instr_liveness, mut block_liveness) = compute_local_liveness(&blocks, &disassembly);
         propagate_global_liveness(&blocks, &mut block_liveness);
         compute_final_liveness(&blocks, &block_liveness, &mut instr_liveness);
 
-        println!("Liveness Analysis:");
-        let mut sorted_instrs: Vec<_> = instr_liveness.iter().collect();
-        sorted_instrs.sort_by_key(|&(addr, _)| addr);
-        for (addr, info) in sorted_instrs {
-            println!("{:04X}: defs={:02X}, uses={:02X}, in={:02X}, out={:02X}", 
-                     addr, info.defs, info.uses, info.live_in, info.live_out);
+        if debug_mode {
+            println!("Liveness Analysis:");
+            let mut sorted_instrs: Vec<_> = instr_liveness.iter().collect();
+            sorted_instrs.sort_by_key(|&(addr, _)| addr);
+            for (addr, info) in sorted_instrs {
+                println!("{:04X}: defs={:02X}, uses={:02X}, in={:02X}, out={:02X}", 
+                         addr, info.defs, info.uses, info.live_in, info.live_out);
+            }
+            println!();
         }
-        println!();
         
         // Step 6. Expression Propagation
         let lifted_blocks = propagate_expressions(&blocks, &disassembly, &instr_liveness);
-        println!("Expressions:");
-        let mut sorted_lifted: Vec<_> = lifted_blocks.iter().collect();
-        sorted_lifted.sort_by_key(|&(addr, _)| addr);
-        for (addr, stmts) in sorted_lifted {
-            println!("Block {:04X}:", addr);
-            for stmt in stmts {
-                println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+        if debug_mode {
+            println!("Expressions:");
+            let mut sorted_lifted: Vec<_> = lifted_blocks.iter().collect();
+            sorted_lifted.sort_by_key(|&(addr, _)| addr);
+            for (addr, stmts) in sorted_lifted {
+                println!("Block {:04X}:", addr);
+                for stmt in stmts {
+                    println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+                }
             }
+            println!();
         }
-        println!();
 
         // Step 7. Expression Collapsing
         let collapsed_blocks = collapse_expressions(lifted_blocks);
         let mut goto_blocks = apply_goto_transformation(collapsed_blocks, &instr_liveness);
         
-        println!("Collapsed Expressions:");
-        let mut sorted_gotos: Vec<_> = goto_blocks.iter().collect();
-        sorted_gotos.sort_by_key(|&(addr, _)| addr);
-        for (addr, stmts) in sorted_gotos {
-            println!("Block {:04X}:", addr);
-            for stmt in stmts {
-                println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+        if debug_mode {
+            println!("Collapsed Expressions:");
+            let mut sorted_gotos: Vec<_> = goto_blocks.iter().collect();
+            sorted_gotos.sort_by_key(|&(addr, _)| addr);
+            for (addr, stmts) in sorted_gotos {
+                println!("Block {:04X}:", addr);
+                for stmt in stmts {
+                    println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+                }
             }
+            println!();
         }
-        println!();
 
         // Step 8. Control Flow Structuring
         structure_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
         structure_conditionals(&mut goto_blocks, &identified_conditionals);
         refine_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
 
-        println!("Structured Control Flow:");
-        let mut sorted_structured: Vec<_> = goto_blocks.iter().collect();
-        sorted_structured.sort_by_key(|&(addr, _)| addr);
-        for (addr, stmts) in sorted_structured {
-            println!("Block {:04X}:", addr);
-            for stmt in stmts {
-                println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+        if debug_mode {
+            println!("Structured Control Flow:");
+            let mut sorted_structured: Vec<_> = goto_blocks.iter().collect();
+            sorted_structured.sort_by_key(|&(addr, _)| addr);
+            for (addr, stmts) in sorted_structured {
+                println!("Block {:04X}:", addr);
+                for stmt in stmts {
+                    println!("  {:04X}: {:?}", stmt.addr, stmt.kind);
+                }
             }
+            println!();
         }
-        println!();
 
         // Step 9. Linearization
-        println!("Linearized Code:");
-        let linear_code = linearize(&goto_blocks);
-        for stmt in &linear_code {
-            println!("{:?}", stmt);
+        if debug_mode {
+            println!("Linearized Code:");
         }
-        println!();
+        let linear_code = linearize(&goto_blocks);
+        if debug_mode {
+            for stmt in &linear_code {
+                println!("{:?}", stmt);
+            }
+            println!();
+        }
 
         // Step 10. Code Output and Symbol Resolution
-        println!("Generated C-Like Code:");
+        if debug_mode {
+            println!("Generated C-Like Code:");
+        }
         let code = generate_code(&linear_code, &symbols);
         println!("{}", code);
     }
 }
+
