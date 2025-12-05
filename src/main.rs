@@ -1590,21 +1590,48 @@ fn structure_loops(
                      if let IRStmtKind::Goto(expr, cc, target) = &stmt.kind {
                          if *target == break_addr {
                              // This is an exit edge.
-                             // The condition for the loop to CONTINUE is the negation of this.
-                             // We preserve the expression and negate the CC.
-                             
+                             // The condition to CONTINUE is the negation.
                              if let Some(e) = expr {
                                  condition = Some(e.clone());
-                                 // Negate CC: (!cc) & 7
-                                 // CC is 3 bits: N(4), Z(2), P(1)
                                  condition_cc = (!cc) & 7;
+                             }
+                         } else if *target == header {
+                             // This is a back edge (do-while style).
+                             // The condition to CONTINUE is exactly this condition.
+                             if let Some(e) = expr {
+                                 condition = Some(e.clone());
+                                 condition_cc = *cc;
                              }
                          }
                      }
                  }
              }
         }
-
+        
+        // Remove the back-edge statement if it matches the loop condition
+        // because it is now subsumed by the DoWhile structure.
+        if let Some(cont_addr) = continue_block {
+            if let Some(stmts) = loop_body.get_mut(&cont_addr) {
+                stmts.retain(|stmt| {
+                    if let IRStmtKind::Goto(expr, cc, target) = &stmt.kind {
+                        if *target == header {
+                            // Check if matches extracted loop condition
+                            let same_cc = *cc == condition_cc;
+                            let same_expr = match (expr, &condition) {
+                                (Some(e1), Some(e2)) => format!("{:?}", e1) == format!("{:?}", e2), 
+                                (None, None) => true,
+                                _ => false,
+                            };
+                            // If it matches, verify if extracting it was correct (i.e. it IS the back edge)
+                            // Yes, target == header.
+                            if same_cc && same_expr { return false; }
+                        }
+                    }
+                    true
+                });
+            }
+        }
+ 
         // Apply Break/Continue
         for (block_addr, stmts) in loop_body.iter_mut() {
             // Check if this block is a condition block for any conditional
@@ -1659,11 +1686,33 @@ fn structure_loops(
     }
 }
 
+fn substitute_register(expr: &Expr, target_reg: u8, replacement: &Expr) -> Expr {
+    match expr {
+        Expr::Register(r) => if *r == target_reg { replacement.clone() } else { Expr::Register(*r) },
+        Expr::Immediate(v) => Expr::Immediate(*v),
+        Expr::Add(l, r) => Expr::Add(Box::new(substitute_register(l, target_reg, replacement)), Box::new(substitute_register(r, target_reg, replacement))),
+        Expr::Sub(l, r) => Expr::Sub(Box::new(substitute_register(l, target_reg, replacement)), Box::new(substitute_register(r, target_reg, replacement))),
+        Expr::And(l, r) => Expr::And(Box::new(substitute_register(l, target_reg, replacement)), Box::new(substitute_register(r, target_reg, replacement))),
+        Expr::Not(e) => Expr::Not(Box::new(substitute_register(e, target_reg, replacement))),
+        Expr::Neg(e) => Expr::Neg(Box::new(substitute_register(e, target_reg, replacement))),
+        Expr::Load(e) => Expr::Load(Box::new(substitute_register(e, target_reg, replacement))),
+    }
+}
+
+fn fold_assignments(mut expr: Expr, assignments: &[(u8, Expr)]) -> Expr {
+    // Apply assignments in reverse order (latest first)
+    for (reg, val) in assignments.iter().rev() {
+        expr = substitute_register(&expr, *reg, val);
+    }
+    expr
+}
+
 fn refine_loops(
     goto_blocks: &mut HashMap<u16, Vec<IRStmt>>,
     identified_loops: &Vec<Loop>,
     blocks: &HashMap<u16, BasicBlock>,
-    conditionals: &Vec<Conditional>
+    conditionals: &Vec<Conditional>,
+    liveness: &HashMap<u16, LivenessInfo>
 ) {
     // 1. DoWhile -> While
     let keys: Vec<u16> = goto_blocks.keys().cloned().collect();
@@ -1678,14 +1727,67 @@ fn refine_loops(
                      let mut converted_to_while = false;
                      let mut new_while_cond = None;
                      let mut new_while_cc = 0;
+                     let mut if_stmt_idx = None;
                      
                      if let Some(entry_stmts) = body.get(&header_addr) {
-                        if let Some(first_stmt) = entry_stmts.first() {
-                            if let IRStmtKind::If(ref if_cond, ref if_cc, ref true_branch, ref false_branch) = first_stmt.kind {
-                                if true_branch.len() == 1 && matches!(true_branch[0].kind, IRStmtKind::Break) && false_branch.is_none() {
-                                    new_while_cond = if_cond.clone();
-                                    new_while_cc = (!if_cc) & 7;
-                                    converted_to_while = true;
+                        let mut pending_assigns = Vec::new();
+                        
+                        for (i, s) in entry_stmts.iter().enumerate() {
+                            match &s.kind {
+                                IRStmtKind::Assign(r, e) => {
+                                    pending_assigns.push((*r, e.clone()));
+                                },
+                                IRStmtKind::If(ref if_cond, ref if_cc, ref true_branch, ref false_branch) => {
+                                    // Check if this is a Break
+                                    if true_branch.len() == 1 && matches!(true_branch[0].kind, IRStmtKind::Break) && false_branch.is_none() {
+                                        // Found candidate
+                                        if_stmt_idx = Some(i);
+                                        
+                                        // Verify liveness on exit
+                                        if !pending_assigns.is_empty() {
+                                            // Find loop info
+                                            if let Some(loop_info) = identified_loops.iter().find(|l| l.header == header_addr) {
+                                                // Check if any defined reg is live in the break block
+                                                let mut dead_on_exit = true;
+                                                if let Some(exit) = loop_info.break_block {
+                                                     if let Some(live_info) = liveness.get(&exit) {
+                                                         for (r, _) in &pending_assigns {
+                                                             if (live_info.live_in & (1 << r)) != 0 {
+                                                                 dead_on_exit = false;
+                                                                 break;
+                                                             }
+                                                         }
+                                                     }
+                                                } else {
+                                                    // If we don't know where it breaks to, assume unsafe
+                                                    dead_on_exit = false;
+                                                }
+                                                
+                                                if dead_on_exit {
+                                                    // Fold!
+                                                    if let Some(cond_expr) = if_cond {
+                                                        let folded = fold_assignments(cond_expr.clone(), &pending_assigns);
+                                                        new_while_cond = Some(folded);
+                                                    }
+                                                    new_while_cc = (!if_cc) & 7;
+                                                    converted_to_while = true;
+                                                }
+                                            } else {
+                                                // Should not happen if data consistent
+                                            };
+                                        } else {
+                                            // No pending assignments, simple move
+                                            new_while_cond = if_cond.clone();
+                                            new_while_cc = (!if_cc) & 7;
+                                            converted_to_while = true;
+                                        }
+                                    }
+                                    // Stop scanning after If (whether we converted or not)
+                                    break;
+                                },
+                                _ => {
+                                    // Side effect or flow control
+                                    break;
                                 }
                             }
                         }
@@ -1694,7 +1796,9 @@ fn refine_loops(
                      if converted_to_while {
                          // Remove the If statement
                          if let Some(entry_stmts) = body.get_mut(&header_addr) {
-                             entry_stmts.remove(0);
+                             if let Some(idx) = if_stmt_idx {
+                                 entry_stmts.remove(idx);
+                             }
                          }
                          stmt.kind = IRStmtKind::While(new_while_cond, new_while_cc, body.clone());
                      }
@@ -2238,6 +2342,73 @@ fn stringify_cc(cc: u8) -> String {
     }
 }
 
+fn stringify_condition(expr: &Expr, cc: u8, symbols: &HashMap<u16, &str>) -> String {
+    // Check for A - B pattern
+    // This could be Add(A, Neg(B)) or Add(A, Imm(-X)) or Sub(A, B) if we had Sub (we do now)
+    
+    let (lhs, rhs) = match expr {
+        Expr::Sub(l, r) => (Some(l), Some(r)),
+        Expr::Add(l, r) => {
+            match &**r {
+                Expr::Neg(inner) => (Some(l), Some(inner)),
+                Expr::Immediate(x) if *x < 0 => {
+                    // Add(A, -X) => A - X. We want condition A - X < 0 => A < X
+                    // So lhs=A, rhs=X
+                    // Wait, if expression is A + (-X) < 0 -> A < X.
+                    // So we treat it as comparison against X.
+                    // We need to construct Expr::Immediate(-x) as rhs.
+                    // But we can't easily construct expressions here without ownership or boxes.
+                    // Let's handle it differently.
+                    (None, None)
+                },
+                _ => (None, None),
+            }
+        },
+        _ => (None, None),
+    };
+
+    if let (Some(l), Some(r)) = (lhs, rhs) {
+        let op = match cc {
+            1 => ">",
+            2 => "==",
+            3 => ">=",
+            4 => "<",
+            5 => "!=",
+            6 => "<=",
+            _ => "",
+        };
+        
+        if !op.is_empty() {
+            return format!("{} {} {}", stringify_expr(l, symbols), op, stringify_expr(r, symbols));
+        }
+    }
+    
+    // Handle Imm(-X) case specifically
+    if let Expr::Add(l, r) = expr {
+        if let Expr::Immediate(x) = &**r {
+            if *x < 0 {
+                // A - X < 0 => A < X.
+                // Comparison is against *positive* X.
+                let target_val = -*x;
+                let op = match cc {
+                    1 => ">",
+                    2 => "==",
+                    3 => ">=",
+                    4 => "<",
+                    5 => "!=",
+                    6 => "<=",
+                    _ => "",
+                };
+                if !op.is_empty() {
+                    return format!("{} {} {}", stringify_expr(l, symbols), op, target_val);
+                }
+            }
+        }
+    }
+
+    format!("{} {}", stringify_expr(expr, symbols), stringify_cc(cc))
+}
+
 fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize) -> String {
     let spaces = " ".repeat(indent * 4);
     match stmt {
@@ -2323,11 +2494,20 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
             // If Store(Imm) -> *Imm = ...
             // Yes, we always dereference the address we are storing to.
             
-            // However, verify if `addr` needs wrapping in parens.
+            // Verify if `addr` needs wrapping in parens.
             if matches!(addr, Expr::Add(_, _) | Expr::Sub(_, _)) {
                  format!("{}*({}) = {};", spaces, addr_str, stringify_expr(val, symbols))
             } else {
-                 format!("{}*{} = {};", spaces, addr_str, stringify_expr(val, symbols))
+                 if let Expr::Immediate(imm) = addr {
+                     let addr_u16 = *imm as u16;
+                     if let Some(name) = symbols.get(&addr_u16) {
+                         format!("{}*{} = {};", spaces, name, stringify_expr(val, symbols))
+                     } else {
+                         format!("{}*{} = {};", spaces, addr_str, stringify_expr(val, symbols))
+                     }
+                 } else {
+                     format!("{}*{} = {};", spaces, addr_str, stringify_expr(val, symbols))
+                 }
             }
         },
         LinearStmt::Goto(cond, cc, target) => {
@@ -2341,7 +2521,7 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
                  format!("{}goto {};", spaces, target_str)
              } else {
                  let cond_str = if let Some(expr) = cond {
-                     format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+                     stringify_condition(expr, *cc, symbols)
                  } else {
                      "true".to_string()
                  };
@@ -2371,7 +2551,7 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
                  s.push('\n');
              }
              let cond_str = if let Some(expr) = cond {
-                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+                 stringify_condition(expr, *cc, symbols)
              } else {
                  "true".to_string()
              };
@@ -2380,7 +2560,7 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
         },
         LinearStmt::While(cond, cc, body) => {
              let cond_str = if let Some(expr) = cond {
-                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+                 stringify_condition(expr, *cc, symbols)
              } else {
                  "true".to_string()
              };
@@ -2400,7 +2580,7 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
              let incr_str = stringify_stmt(incr, symbols, 0).trim().trim_end_matches(';').to_string();
              
              let cond_str = if let Some(expr) = cond {
-                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+                 stringify_condition(expr, *cc, symbols)
              } else {
                  "true".to_string()
              };
@@ -2417,7 +2597,7 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
         },
         LinearStmt::If(cond, cc, true_branch, false_branch) => {
              let cond_str = if let Some(expr) = cond {
-                 format!("{} {}", stringify_expr(expr, symbols), stringify_cc(*cc))
+                 stringify_condition(expr, *cc, symbols)
              } else {
                  "true".to_string()
              };
@@ -2663,7 +2843,7 @@ fn main() {
         // Step 8. Control Flow Structuring
         structure_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
         structure_conditionals(&mut goto_blocks, &identified_conditionals);
-        refine_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
+        refine_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals, &instr_liveness);
 
         if debug_mode {
             println!("Structured Control Flow:");
