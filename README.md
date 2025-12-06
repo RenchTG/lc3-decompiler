@@ -2,6 +2,8 @@
 
 A decompiler for LC-3 (Little Computer 3) assembly architecture. Converts the .TEXT and .SYMBOL sections from an object file into high-level C-like pseudocode.
 
+Heavily inspired and aided by https://www.backerstreet.com/decompiler/introduction.php. The best introduction and explanation of decompiler design/algorithms I could find online.
+
 ## Features
 
 - **Disassembly** - Converts LC-3 object files to readable assembly with symbol resolution
