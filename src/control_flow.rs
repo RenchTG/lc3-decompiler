@@ -27,13 +27,37 @@ pub struct Conditional {
 }
 
 pub fn identify_loops(natural_loops: &mut Vec<NaturalLoop>, blocks: &HashMap<u16, BasicBlock>) -> Vec<Loop> {
+    // First, merge natural loops that share the same header
+    // This handles cases like `while (a && b)` which creates two back-edges to the same header
+    let mut merged_loops: Vec<NaturalLoop> = Vec::new();
+    
+    for natural_loop in natural_loops.iter() {
+        let mut found = false;
+        for merged in merged_loops.iter_mut() {
+            if merged.header == natural_loop.header {
+                // Merge the blocks
+                for block in &natural_loop.blocks {
+                    merged.blocks.insert(*block);
+                }
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            merged_loops.push(NaturalLoop {
+                header: natural_loop.header,
+                blocks: natural_loop.blocks.clone(),
+            });
+        }
+    }
+
     // Sort loops from innermost loop to outermost loop
-    natural_loops.sort_by(|a, b| a.blocks.len().cmp(&b.blocks.len()));
+    merged_loops.sort_by(|a, b| a.blocks.len().cmp(&b.blocks.len()));
 
     let mut loops = Vec::new();
 
     // for each loop in loopSet
-    for natural_loop in natural_loops.iter() {
+    for natural_loop in merged_loops.iter() {
         // blocks = loop->blocks
         let loop_blocks: HashSet<u16> = natural_loop.blocks.clone();
 
@@ -281,6 +305,19 @@ fn substitute_register(expr: &Expr, target_reg: u8, replacement: &Expr) -> Expr 
         Expr::Not(e) => Expr::Not(Box::new(substitute_register(e, target_reg, replacement))),
         Expr::Neg(e) => Expr::Neg(Box::new(substitute_register(e, target_reg, replacement))),
         Expr::Load(e) => Expr::Load(Box::new(substitute_register(e, target_reg, replacement))),
+        Expr::Param(idx) => Expr::Param(*idx),
+        Expr::Call(target, args) => Expr::Call(
+            Box::new(substitute_register(target, target_reg, replacement)),
+            args.iter().map(|a| substitute_register(a, target_reg, replacement)).collect()
+        ),
+        Expr::LogicalAnd(l, lcc, r, rcc) => Expr::LogicalAnd(
+            Box::new(substitute_register(l, target_reg, replacement)), *lcc,
+            Box::new(substitute_register(r, target_reg, replacement)), *rcc
+        ),
+        Expr::LogicalOr(l, lcc, r, rcc) => Expr::LogicalOr(
+            Box::new(substitute_register(l, target_reg, replacement)), *lcc,
+            Box::new(substitute_register(r, target_reg, replacement)), *rcc
+        ),
     }
 }
 
@@ -317,7 +354,7 @@ pub fn refine_loops(
                         
                         for (i, s) in entry_stmts.iter().enumerate() {
                             match &s.kind {
-                                IRStmtKind::Assign(r, e) => {
+                                IRStmtKind::Assign(r, e) => { // Changed from Store to Assign
                                     pending_assigns.push((*r, e.clone()));
                                 },
                                 IRStmtKind::If(ref if_cond, ref if_cc, ref true_branch, ref false_branch) => {
@@ -372,6 +409,80 @@ pub fn refine_loops(
                          }
                          stmt.kind = IRStmtKind::While(new_while_cond, new_while_cc, body.clone());
                      }
+                }
+            }
+        }
+    }
+    
+    // Pass 2: Combine consecutive If(cond, cc, [Break]) statements in While loops into compound conditions
+    let keys2: Vec<u16> = goto_blocks.keys().cloned().collect();
+    for key in keys2 {
+        if let Some(stmts) = goto_blocks.get_mut(&key) {
+            if stmts.len() == 1 {
+                let header_addr = stmts[0].addr;
+                let stmt = &mut stmts[0];
+                if let IRStmtKind::While(ref mut cond, ref mut cc, ref mut body) = stmt.kind {
+                    // Look for If(cond, cc, [Break]) at the start of blocks other than the header
+                    // These represent additional conditions in a compound `while (a && b && ...)` loop
+                    
+                    // Find all blocks in the loop body that start with If([Break])
+                    let mut blocks_to_check: Vec<u16> = body.keys().cloned().collect();
+                    blocks_to_check.sort();
+                    
+                    // Skip header block since its condition is already in the while
+                    let mut extra_conditions: Vec<(Expr, u8, u16)> = Vec::new(); // (cond, cc, block_addr)
+                    
+                    for &block_addr in &blocks_to_check {
+                        if block_addr == header_addr {
+                            continue;
+                        }
+                        
+                        if let Some(block_stmts) = body.get(&block_addr) {
+                            if let Some(first_stmt) = block_stmts.first() {
+                                if let IRStmtKind::If(Some(if_cond), if_cc, true_branch, None) = &first_stmt.kind {
+                                    // Check if this is a simple If([Break])
+                                    if true_branch.len() == 1 && matches!(true_branch[0].kind, IRStmtKind::Break) {
+                                        // This is a break condition - negate it for the while condition
+                                        let while_cc = (!if_cc) & 7;
+                                        extra_conditions.push((if_cond.clone(), while_cc, block_addr));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // If we found additional break conditions, combine them with the main condition
+                    if !extra_conditions.is_empty() {
+                        // Remove the If statements from the blocks
+                        for (_, _, block_addr) in &extra_conditions {
+                            if let Some(block_stmts) = body.get_mut(block_addr) {
+                                if !block_stmts.is_empty() {
+                                    block_stmts.remove(0);
+                                }
+                            }
+                        }
+                        
+                        // Build the compound condition: current_cond && extra1 && extra2 && ...
+                        if let Some(current_cond) = cond.take() {
+                            let current_cc = *cc;
+                            let mut compound = current_cond;
+                            let mut compound_cc = current_cc;
+                            
+                            for (extra_cond, extra_cc, _) in extra_conditions {
+                                // Create LogicalAnd(lhs, lhs_cc, rhs, rhs_cc)
+                                compound = Expr::LogicalAnd(
+                                    Box::new(compound),
+                                    compound_cc,
+                                    Box::new(extra_cond),
+                                    extra_cc
+                                );
+                                compound_cc = 7; // Always evaluate the LogicalAnd expression
+                            }
+                            
+                            *cond = Some(compound);
+                            *cc = 7; // Always use the compound condition (cc=7 means use as-is)
+                        }
+                    }
                 }
             }
         }
@@ -445,7 +556,7 @@ pub fn refine_loops(
                                     continue_block_addr = Some(cont_addr);
                                     
                                     if let Some(last) = stmts.last() {
-                                        let is_terminator = matches!(last.kind, IRStmtKind::Continue | IRStmtKind::Goto(_, _, _) | IRStmtKind::Break | IRStmtKind::Return | IRStmtKind::Trap(_));
+                                        let is_terminator = matches!(last.kind, IRStmtKind::Continue | IRStmtKind::Goto(_, _, _) | IRStmtKind::Break | IRStmtKind::Return(_) | IRStmtKind::Trap(_));
                                         
                                         let potential_incr = if is_terminator {
                                             if stmts.len() >= 2 { Some(&stmts[stmts.len() - 2]) } else { None }
@@ -472,7 +583,7 @@ pub fn refine_loops(
                             
                              if let Some(stmts) = body.get_mut(&cont_addr) {
                                  let is_terminator = if let Some(last) = stmts.last() {
-                                     matches!(last.kind, IRStmtKind::Continue | IRStmtKind::Goto(_, _, _) | IRStmtKind::Break | IRStmtKind::Return | IRStmtKind::Trap(_))
+                                     matches!(last.kind, IRStmtKind::Continue | IRStmtKind::Goto(_, _, _) | IRStmtKind::Break | IRStmtKind::Return(_) | IRStmtKind::Trap(_))
                                  } else { false };
                                  
                                  if is_terminator {
@@ -503,6 +614,147 @@ pub fn refine_loops(
             if let Some(pos) = stmts.iter().position(|s| s.addr == stmt_addr) {
                 stmts.remove(pos);
             }
+        }
+    }
+}
+
+/// Merge consecutive blocks with conditional gotos to the same false target into compound conditions.
+/// Pattern: Block A ends with Goto(cond1, cc1, Lfalse), Block B ends with Goto(cond2, cc2, Lfalse)
+/// where A's other successor is B. This becomes a single compound condition.
+pub fn merge_compound_conditions(
+    goto_blocks: &mut HashMap<u16, Vec<IRStmt>>,
+    cfg_blocks: &HashMap<u16, BasicBlock>,
+    natural_loops: &Vec<NaturalLoop>
+) {
+    // Collect all loop headers to skip - loops handle compound conditions differently
+    let loop_headers: HashSet<u16> = natural_loops.iter().map(|l| l.header).collect();
+    
+    let mut changes_made = true;
+    
+    while changes_made {
+        changes_made = false;
+        let block_addrs: Vec<u16> = goto_blocks.keys().cloned().collect();
+        
+        for &block_addr in &block_addrs {
+            // Skip loop headers - they're handled by the While loop merging logic
+            if loop_headers.contains(&block_addr) {
+                continue;
+            }
+            
+            // Get the CFG info for this block
+            let succs = if let Some(cfg) = cfg_blocks.get(&block_addr) {
+                cfg.succs.clone()
+            } else {
+                continue;
+            };
+            
+            // We need exactly 2 successors (conditional branch)
+            if succs.len() != 2 {
+                continue;
+            }
+            
+            // Check if the last statement is a conditional Goto
+            let (cond1, cc1, false_target) = {
+                if let Some(stmts) = goto_blocks.get(&block_addr) {
+                    if let Some(last) = stmts.last() {
+                        if let IRStmtKind::Goto(Some(cond), cc, target) = &last.kind {
+                            if *cc != 7 { // Must be conditional, not unconditional
+                                (cond.clone(), *cc, *target)
+                            } else {
+                                continue;
+                            }
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            };
+            
+            // Find the fall-through successor (the one that's not the goto target)
+            let fallthrough = succs.iter().find(|&&s| s != false_target).copied();
+            let fallthrough_addr = if let Some(addr) = fallthrough {
+                addr
+            } else {
+                continue;
+            };
+            
+            // Check if the fallthrough block also has a conditional goto to the SAME false target
+            let fallthrough_succs = if let Some(cfg) = cfg_blocks.get(&fallthrough_addr) {
+                cfg.succs.clone()
+            } else {
+                continue;
+            };
+            
+            if fallthrough_succs.len() != 2 || !fallthrough_succs.contains(&false_target) {
+                continue;
+            }
+            
+            // Check if the fallthrough block's last statement is a conditional Goto to the same target
+            let (cond2, cc2, _stmt_addr2) = {
+                if let Some(stmts) = goto_blocks.get(&fallthrough_addr) {
+                    if let Some(last) = stmts.last() {
+                        if let IRStmtKind::Goto(Some(cond), cc, target) = &last.kind {
+                            if *target == false_target && *cc != 7 {
+                                (cond.clone(), *cc, last.addr)
+                            } else {
+                                continue;
+                            }
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            };
+            
+            // The fallthrough block must only have the conditional goto (or we'd lose other statements)
+            let can_merge = {
+                if let Some(stmts) = goto_blocks.get(&fallthrough_addr) {
+                    stmts.len() == 1
+                } else {
+                    false
+                }
+            };
+            
+            if !can_merge {
+                continue;
+            }
+            
+            // Both gotos target the same false_target - we can merge!
+            // Original pattern: if(cond1) goto L; if(cond2) goto L;
+            // This is equivalent to: if(cond1 OR cond2) goto L
+            // We use the ORIGINAL CCs since they represent "when to jump"
+            let compound = Expr::LogicalOr(
+                Box::new(cond1),
+                cc1,
+                Box::new(cond2),
+                cc2
+            );
+            
+            // Find the true continuation (not the false target) from the fallthrough block
+            let _true_continuation = fallthrough_succs.iter().find(|&&s| s != false_target).copied();
+            
+            // Update the first block: replace its Goto with the compound condition
+            if let Some(stmts) = goto_blocks.get_mut(&block_addr) {
+                if let Some(last) = stmts.last_mut() {
+                    // cc=5 means "!= 0" which makes the goto conditional
+                    // The LogicalOr carries its own CCs that stringify_condition will use
+                    last.kind = IRStmtKind::Goto(Some(compound), 5, false_target);
+                }
+            }
+            
+            // Remove the fallthrough block (it's been merged)
+            goto_blocks.remove(&fallthrough_addr);
+            
+            changes_made = true;
+            break; // Restart the loop since we modified the blocks
         }
     }
 }
@@ -631,5 +883,52 @@ pub fn structure_conditionals(
                 stmts[last_idx] = if_stmt;
             }
         }
+    }
+}
+
+/// Remove redundant Continue statements at the end of If branches inside loop bodies.
+/// A Continue at the very end of an If/IfElse true or false branch is redundant
+/// because control flow naturally continues to the next loop iteration after the If.
+fn remove_redundant_continues_from_stmts(stmts: &mut Vec<IRStmt>) {
+    for stmt in stmts.iter_mut() {
+        match &mut stmt.kind {
+            IRStmtKind::If(_, _, ref mut true_branch, ref mut false_branch) => {
+                // Remove trailing Continue from true branch
+                if let Some(last) = true_branch.last() {
+                    if matches!(last.kind, IRStmtKind::Continue) {
+                        true_branch.pop();
+                    }
+                }
+                // Remove trailing Continue from false branch
+                if let Some(fb) = false_branch {
+                    if let Some(last) = fb.last() {
+                        if matches!(last.kind, IRStmtKind::Continue) {
+                            fb.pop();
+                        }
+                    }
+                }
+                // Recursively process If branches
+                remove_redundant_continues_from_stmts(true_branch);
+                if let Some(fb) = false_branch {
+                    remove_redundant_continues_from_stmts(fb);
+                }
+            },
+            IRStmtKind::DoWhile(_, _, body) |
+            IRStmtKind::While(_, _, body) |
+            IRStmtKind::For(_, _, _, _, body) => {
+                // Recursively process loop bodies
+                for stmts in body.values_mut() {
+                    remove_redundant_continues_from_stmts(stmts);
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
+/// Public function to clean up redundant control flow statements
+pub fn cleanup_control_flow(blocks: &mut HashMap<u16, Vec<IRStmt>>) {
+    for stmts in blocks.values_mut() {
+        remove_redundant_continues_from_stmts(stmts);
     }
 }

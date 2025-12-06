@@ -5,6 +5,7 @@ mod ir;
 mod control_flow;
 mod linear;
 mod codegen;
+mod stack;
 
 use std::fs;
 
@@ -12,25 +13,30 @@ use disasm::{gen_sections, disassemble, identify_code_data};
 use cfg::{create_basic_blocks, compute_dominators, compute_natural_loops};
 use control_flow::{identify_loops, identify_conditionals, structure_loops, structure_conditionals, refine_loops, ConditionalType};
 use liveness::{compute_local_liveness, propagate_global_liveness, compute_final_liveness};
-use ir::{propagate_expressions, collapse_expressions, apply_goto_transformation}; 
+use ir::{propagate_expressions, collapse_expressions, apply_goto_transformation, propagate_variables}; 
 use linear::{linearize};
 use codegen::generate_code;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: {} <path to obj file> [-d|--debug] [-e|--entry <addr>]", args[0]);
+        eprintln!("Usage: {} <path to obj file> [-d|--debug] [-e|--entry <addr>] [-c|--convention]", args[0]);
         std::process::exit(1);
     }
     
     let mut debug_mode = false;
-    let mut entry_request: Option<String> = None;
+    let mut use_stack_convention = false;
+    let mut entry_request: Option<String> = None;    
     
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
             "-d" | "--debug" => {
                 debug_mode = true;
+                i += 1;
+            },
+            "-c" | "--convention" => {
+                use_stack_convention = true;
                 i += 1;
             },
             "-e" | "--entry" => {
@@ -214,9 +220,27 @@ fn main() {
         }
 
         // Step 8. Control Flow Structuring
+        
+        // Merge consecutive conditional gotos to the same target into compound conditions
+        // This must run BEFORE structure_loops so blocks are still available at top level
+        // We pass natural_loops to skip loop headers (they're handled by While loop merging)
+        control_flow::merge_compound_conditions(&mut goto_blocks, &blocks, &natural_loops);
+        
         structure_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals);
         structure_conditionals(&mut goto_blocks, &identified_conditionals);
+
+        if use_stack_convention {
+            stack::process_callee(&mut goto_blocks, entry_addr);
+            stack::process_caller(&mut goto_blocks);
+        }
+
+        // Propagate single-use variables after stack convention processing
+        propagate_variables(&mut goto_blocks);
+
         refine_loops(&mut goto_blocks, &identified_loops, &blocks, &identified_conditionals, &instr_liveness);
+
+        // Clean up redundant control flow (e.g., trailing continues in if branches)
+        control_flow::cleanup_control_flow(&mut goto_blocks);
 
         if debug_mode {
             println!("Structured Control Flow:");
@@ -236,6 +260,13 @@ fn main() {
             println!("Linearized Code:");
         }
         let linear_code = linearize(&goto_blocks);
+        
+        // Step 9b. Structure if-goto patterns into proper If-Else statements
+        let structured_code = linear::structure_if_goto_patterns(linear_code.clone());
+        
+        // Step 9c. Remove orphaned labels (labels with no gotos pointing to them)
+        let final_code = linear::remove_orphaned_labels(structured_code);
+        
         if debug_mode {
             for stmt in &linear_code {
                 println!("{:?}", stmt);
@@ -247,7 +278,7 @@ fn main() {
         if debug_mode {
             println!("Generated C-Like Code:");
         }
-        let code = generate_code(&linear_code, &symbols);
+        let code = generate_code(&final_code, &symbols);
         println!("{}", code);
     }
 }

@@ -16,6 +16,10 @@ pub enum Expr {
     Neg(Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     Load(Box<Expr>), // Represents memory load from address
+    Param(u8),       // Function parameter (0-indexed)
+    Call(Box<Expr>, Vec<Expr>), // Function call as expression
+    LogicalAnd(Box<Expr>, u8, Box<Expr>, u8),  // (lhs_expr, lhs_cc, rhs_expr, rhs_cc)
+    LogicalOr(Box<Expr>, u8, Box<Expr>, u8),
 }
 
 impl fmt::Debug for Expr {
@@ -30,6 +34,20 @@ impl fmt::Debug for Expr {
             Expr::Neg(e) => write!(f, "Neg({:?})", e),
             Expr::Sub(lhs, rhs) => write!(f, "Sub({:?}, {:?})", lhs, rhs),
             Expr::Load(e) => write!(f, "Load({:?})", e),
+            Expr::Param(idx) => write!(f, "Param({})", idx),
+            Expr::Call(target, args) => {
+                write!(f, "CallExpr({:?}", target)?;
+                for arg in args {
+                    write!(f, ", {:?}", arg)?;
+                }
+                write!(f, ")")
+            },
+            Expr::LogicalAnd(lhs, lhs_cc, rhs, rhs_cc) => {
+                write!(f, "LogicalAnd({:?}, 0x{:X}, {:?}, 0x{:X})", lhs, lhs_cc, rhs, rhs_cc)
+            },
+            Expr::LogicalOr(lhs, lhs_cc, rhs, rhs_cc) => {
+                write!(f, "LogicalOr({:?}, 0x{:X}, {:?}, 0x{:X})", lhs, lhs_cc, rhs, rhs_cc)
+            },
         }
     }
 }
@@ -39,8 +57,8 @@ pub enum IRStmtKind {
     Assign(u8, Expr),       // Reg = Expr
     Store(Expr, Expr),      // Mem[Addr] = Value
     Goto(Option<Expr>, u8, u16), // Expression, Condition (CC), Target
-    Call(Expr),             // JSR/JSRR
-    Return,                 // RET
+    Call(Expr, Vec<Expr>),  // Target, Arguments
+    Return(Option<Expr>),   // RET, Optional Return Value
     Trap(u8),               // TRAP vector
     DoWhile(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
     While(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
@@ -56,8 +74,19 @@ impl fmt::Debug for IRStmtKind {
             IRStmtKind::Assign(reg, expr) => write!(f, "Assign({}, {:?})", reg, expr),
             IRStmtKind::Store(addr, val) => write!(f, "Store({:?}, {:?})", addr, val),
             IRStmtKind::Goto(expr, cc, target) => write!(f, "Goto({:?}, 0x{:X}, 0x{:X})", expr, cc, target),
-            IRStmtKind::Call(target) => write!(f, "Call({:?})", target),
-            IRStmtKind::Return => write!(f, "Return"),
+            IRStmtKind::Call(target, args) => {
+                write!(f, "Call({:?}", target)?;
+                for arg in args {
+                    write!(f, ", {:?}", arg)?;
+                }
+                write!(f, ")")
+            },
+            IRStmtKind::Return(val) => {
+                match val {
+                    Some(v) => write!(f, "Return({:?})", v),
+                    None => write!(f, "Return"),
+                }
+            },
             IRStmtKind::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
             IRStmtKind::DoWhile(cond, cc, body) => {
                 write!(f, "DoWhile({:?}, 0x{:X}, {{", cond, cc)?;
@@ -452,7 +481,7 @@ pub fn propagate_expressions(
                              }
 
                              if base.reg_no() == 7 {
-                                 ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return });
+                                 ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return(None) });
                              } else {
                                  ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Trap(0xFF) });
                              }
@@ -469,7 +498,7 @@ pub fn propagate_expressions(
                                 PCOffset::Label(_) => 0,
                             };
                              let target = (addr as i16 + 1 + offset) as u16;
-                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(Expr::Immediate(target as i16)) });
+                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(Expr::Immediate(target as i16), Vec::new()) });
                         },
                         AsmInstr::JSRR(base) => {
                              for reg in pending_order.drain(..) {
@@ -479,7 +508,7 @@ pub fn propagate_expressions(
                              }
                              
                              let src_reg = base.reg_no();
-                             ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(Expr::Register(src_reg)) });
+                             ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Call(Expr::Register(src_reg), Vec::new()) });
                         },
                         AsmInstr::RET => {
                              for reg in pending_order.drain(..) {
@@ -487,7 +516,7 @@ pub fn propagate_expressions(
                                      ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
-                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return });
+                            ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return(None) });
                         },
                         AsmInstr::TRAP(vect8) => {
                              for reg in pending_order.drain(..) {
@@ -520,7 +549,18 @@ pub fn propagate_expressions(
 
 pub fn collapse_expr(expr: Expr) -> (Expr, bool) {
     match expr {
-        Expr::Register(_) | Expr::Immediate(_) => (expr, false),
+        Expr::Register(_) | Expr::Immediate(_) | Expr::Param(_) => (expr, false),
+        Expr::Call(target, args) => {
+             let (new_target, changed_target) = collapse_expr(*target);
+             let mut changed_args = false;
+             let new_args = args.into_iter().map(|arg| {
+                 let (new_arg, changed) = collapse_expr(arg);
+                 if changed { changed_args = true; }
+                 new_arg
+             }).collect();
+             
+             (Expr::Call(Box::new(new_target), new_args), changed_target || changed_args)
+        },
         Expr::Load(inner) => {
             let (new_inner, changed) = collapse_expr(*inner);
             (Expr::Load(Box::new(new_inner)), changed)
@@ -615,7 +655,17 @@ pub fn collapse_expr(expr: Expr) -> (Expr, bool) {
                      }
                 }
             }
-        }
+        },
+        Expr::LogicalAnd(lhs, lhs_cc, rhs, rhs_cc) => {
+            let (new_lhs, changed_lhs) = collapse_expr(*lhs);
+            let (new_rhs, changed_rhs) = collapse_expr(*rhs);
+            (Expr::LogicalAnd(Box::new(new_lhs), lhs_cc, Box::new(new_rhs), rhs_cc), changed_lhs || changed_rhs)
+        },
+        Expr::LogicalOr(lhs, lhs_cc, rhs, rhs_cc) => {
+            let (new_lhs, changed_lhs) = collapse_expr(*lhs);
+            let (new_rhs, changed_rhs) = collapse_expr(*rhs);
+            (Expr::LogicalOr(Box::new(new_lhs), lhs_cc, Box::new(new_rhs), rhs_cc), changed_lhs || changed_rhs)
+        },
     }
 }
 
@@ -651,18 +701,218 @@ pub fn collapse_stmt(stmt: &mut IRStmt) -> bool {
 }
 
 pub fn collapse_expressions(mut blocks: HashMap<u16, Vec<IRStmt>>) -> HashMap<u16, Vec<IRStmt>> {
+    // Expression simplification only - variable propagation runs separately after stack processing
     let mut changed = true;
     while changed {
         changed = false;
         for stmts in blocks.values_mut() {
-            for stmt in stmts {
+            for stmt in stmts.iter_mut() {
                 if collapse_stmt(stmt) {
                     changed = true;
                 }
             }
         }
     }
+    
     blocks
+}
+
+// Public function to propagate single-use variables - call after stack convention processing
+pub fn propagate_variables(blocks: &mut HashMap<u16, Vec<IRStmt>>) {
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for stmts in blocks.values_mut() {
+            changed = propagate_single_use_vars(stmts) || changed;
+        }
+    }
+}
+
+// Count how many times a register is used in an expression
+fn count_reg_uses_in_expr(expr: &Expr, reg: u8) -> usize {
+    match expr {
+        Expr::Register(r) => if *r == reg { 1 } else { 0 },
+        Expr::Immediate(_) | Expr::Param(_) => 0,
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::And(l, r) => {
+            count_reg_uses_in_expr(l, reg) + count_reg_uses_in_expr(r, reg)
+        },
+        Expr::Not(e) | Expr::Neg(e) | Expr::Load(e) => count_reg_uses_in_expr(e, reg),
+        Expr::Call(target, args) => {
+            count_reg_uses_in_expr(target, reg) + 
+            args.iter().map(|a| count_reg_uses_in_expr(a, reg)).sum::<usize>()
+        },
+        Expr::LogicalAnd(l, _, r, _) | Expr::LogicalOr(l, _, r, _) => {
+            count_reg_uses_in_expr(l, reg) + count_reg_uses_in_expr(r, reg)
+        },
+    }
+}
+
+// Count how many times a register is used in a statement
+fn count_reg_uses_in_stmt(stmt: &IRStmt, reg: u8) -> usize {
+    match &stmt.kind {
+        IRStmtKind::Assign(_, expr) => count_reg_uses_in_expr(expr, reg),
+        IRStmtKind::Store(addr, val) => {
+            count_reg_uses_in_expr(addr, reg) + count_reg_uses_in_expr(val, reg)
+        },
+        IRStmtKind::Goto(Some(cond), _, _) => count_reg_uses_in_expr(cond, reg),
+        IRStmtKind::Goto(None, _, _) => 0,
+        IRStmtKind::Call(target, args) => {
+            count_reg_uses_in_expr(target, reg) + 
+            args.iter().map(|a| count_reg_uses_in_expr(a, reg)).sum::<usize>()
+        },
+        IRStmtKind::Return(Some(e)) => count_reg_uses_in_expr(e, reg),
+        IRStmtKind::Return(None) => 0,
+        IRStmtKind::Trap(_) | IRStmtKind::Break | IRStmtKind::Continue => 0,
+        IRStmtKind::DoWhile(cond, _, body) | IRStmtKind::While(cond, _, body) => {
+            let cond_uses = cond.as_ref().map_or(0, |c| count_reg_uses_in_expr(c, reg));
+            cond_uses + body.values().flat_map(|s| s.iter()).map(|s| count_reg_uses_in_stmt(s, reg)).sum::<usize>()
+        },
+        IRStmtKind::For(init, cond, _, incr, body) => {
+            count_reg_uses_in_stmt(init, reg) +
+            cond.as_ref().map_or(0, |c| count_reg_uses_in_expr(c, reg)) +
+            count_reg_uses_in_stmt(incr, reg) +
+            body.values().flat_map(|s| s.iter()).map(|s| count_reg_uses_in_stmt(s, reg)).sum::<usize>()
+        },
+        IRStmtKind::If(cond, _, true_branch, false_branch) => {
+            let cond_uses = cond.as_ref().map_or(0, |c| count_reg_uses_in_expr(c, reg));
+            cond_uses + 
+            true_branch.iter().map(|s| count_reg_uses_in_stmt(s, reg)).sum::<usize>() +
+            false_branch.as_ref().map_or(0, |fb| fb.iter().map(|s| count_reg_uses_in_stmt(s, reg)).sum::<usize>())
+        },
+    }
+}
+
+// Check if a register is defined in a statement (excluding the assignment itself)
+fn defines_reg(stmt: &IRStmt, reg: u8) -> bool {
+    match &stmt.kind {
+        IRStmtKind::Assign(dst, _) => *dst == reg,
+        _ => false,
+    }
+}
+
+// Replace all uses of a register with an expression
+fn replace_reg_in_expr(expr: &mut Expr, reg: u8, replacement: &Expr) {
+    match expr {
+        Expr::Register(r) => {
+            if *r == reg {
+                *expr = replacement.clone();
+            }
+        },
+        Expr::Immediate(_) | Expr::Param(_) => {},
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::And(l, r) => {
+            replace_reg_in_expr(l, reg, replacement);
+            replace_reg_in_expr(r, reg, replacement);
+        },
+        Expr::Not(e) | Expr::Neg(e) | Expr::Load(e) => {
+            replace_reg_in_expr(e, reg, replacement);
+        },
+        Expr::Call(target, args) => {
+            replace_reg_in_expr(target, reg, replacement);
+            for arg in args {
+                replace_reg_in_expr(arg, reg, replacement);
+            }
+        },
+        Expr::LogicalAnd(l, _, r, _) | Expr::LogicalOr(l, _, r, _) => {
+            replace_reg_in_expr(l, reg, replacement);
+            replace_reg_in_expr(r, reg, replacement);
+        },
+    }
+}
+
+fn replace_reg_in_stmt(stmt: &mut IRStmt, reg: u8, replacement: &Expr) {
+    match &mut stmt.kind {
+        IRStmtKind::Assign(_, expr) => replace_reg_in_expr(expr, reg, replacement),
+        IRStmtKind::Store(addr, val) => {
+            replace_reg_in_expr(addr, reg, replacement);
+            replace_reg_in_expr(val, reg, replacement);
+        },
+        IRStmtKind::Goto(Some(cond), _, _) => replace_reg_in_expr(cond, reg, replacement),
+        IRStmtKind::Call(target, args) => {
+            replace_reg_in_expr(target, reg, replacement);
+            for arg in args {
+                replace_reg_in_expr(arg, reg, replacement);
+            }
+        },
+        IRStmtKind::Return(Some(e)) => replace_reg_in_expr(e, reg, replacement),
+        _ => {},
+    }
+}
+
+// Propagate single-use variables in a list of statements
+fn propagate_single_use_vars(stmts: &mut Vec<IRStmt>) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    
+    while i < stmts.len() {
+        // Check if this is an Assign statement
+        if let IRStmtKind::Assign(reg, _) = &stmts[i].kind {
+            let reg = *reg;
+            
+            // Skip R6 (stack pointer) and R7 (return address) - these are special
+            if reg == 6 || reg == 7 {
+                i += 1;
+                continue;
+            }
+            
+            // Count uses in subsequent statements (before next definition of this reg)
+            let mut use_count = 0;
+            let mut use_stmt_idx = None;
+            let mut use_in_loop = false;
+            
+            for j in (i + 1)..stmts.len() {
+                let stmt = &stmts[j];
+                
+                // Check if this statement redefines the register
+                if defines_reg(stmt, reg) {
+                    break;
+                }
+                
+                // Check if the use is inside a loop (While, DoWhile, For)
+                // Uses inside loops count as "multiple" since the loop can iterate
+                let is_loop = matches!(&stmt.kind, 
+                    IRStmtKind::While(_, _, _) | 
+                    IRStmtKind::DoWhile(_, _, _) | 
+                    IRStmtKind::For(_, _, _, _, _)
+                );
+                
+                let uses = count_reg_uses_in_stmt(stmt, reg);
+                if uses > 0 {
+                    use_count += uses;
+                    if use_stmt_idx.is_none() {
+                        use_stmt_idx = Some(j);
+                    }
+                    if is_loop {
+                        use_in_loop = true;
+                    }
+                }
+            }
+            
+            // If used exactly once AND not inside a loop
+            if use_count == 1 && !use_in_loop {
+                if let Some(use_idx) = use_stmt_idx {
+                    // Get the expression from the assignment
+                    let expr = if let IRStmtKind::Assign(_, e) = &stmts[i].kind {
+                        e.clone()
+                    } else {
+                        i += 1;
+                        continue;
+                    };
+                    
+                    // Replace the register usage with the expression
+                    replace_reg_in_stmt(&mut stmts[use_idx], reg, &expr);
+                    
+                    // Remove the assignment statement
+                    stmts.remove(i);
+                    changed = true;
+                    // Don't increment i since we removed the current element
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    
+    changed
 }
 
 pub fn apply_goto_transformation(

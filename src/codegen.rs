@@ -7,7 +7,15 @@ fn stringify_expr(expr: &Expr, symbols: &HashMap<u16, &str>) -> String {
         Expr::Register(r) => format!("var{}", r),
         Expr::Immediate(val) => format!("{}", val),
 
-        Expr::Add(lhs, rhs) => format!("{} + {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
+        Expr::Add(lhs, rhs) => {
+            // Check if rhs is a negative immediate - format as subtraction
+            if let Expr::Immediate(val) = &**rhs {
+                if *val < 0 {
+                    return format!("{} - {}", stringify_expr(lhs, symbols), -val);
+                }
+            }
+            format!("{} + {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols))
+        },
         Expr::Sub(lhs, rhs) => format!("{} - {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
         Expr::And(lhs, rhs) => format!("{} & {}", stringify_expr(lhs, symbols), stringify_expr(rhs, symbols)),
         Expr::Not(e) => format!("~{}", stringify_expr(e, symbols)),
@@ -28,6 +36,30 @@ fn stringify_expr(expr: &Expr, symbols: &HashMap<u16, &str>) -> String {
                 format!("*({})", stringify_expr(e, symbols))
             }
         },
+        Expr::Param(idx) => format!("param{}", idx),
+        Expr::Call(target, args) => {
+             let args_str = args.iter().map(|arg| stringify_expr(arg, symbols)).collect::<Vec<String>>().join(", ");
+             if let Expr::Immediate(addr) = **target {
+                 let addr_u16 = addr as u16;
+                  if let Some(name) = symbols.get(&addr_u16) {
+                      format!("{}({})", name, args_str)
+                  } else {
+                      format!("func_{:04X}({})", addr_u16, args_str)
+                  }
+             } else {
+                 format!("{}({})", stringify_expr(target, symbols), args_str)
+             }
+        },
+        Expr::LogicalAnd(lhs, lhs_cc, rhs, rhs_cc) => {
+            format!("{} && {}", 
+                    stringify_condition(lhs, *lhs_cc, symbols),
+                    stringify_condition(rhs, *rhs_cc, symbols))
+        },
+        Expr::LogicalOr(lhs, lhs_cc, rhs, rhs_cc) => {
+            format!("{} || {}", 
+                    stringify_condition(lhs, *lhs_cc, symbols),
+                    stringify_condition(rhs, *rhs_cc, symbols))
+        },
     }
 }
 
@@ -47,6 +79,18 @@ fn stringify_cc(cc: u8) -> String {
 }
 
 fn stringify_condition(expr: &Expr, cc: u8, symbols: &HashMap<u16, &str>) -> String {
+    // Handle LogicalAnd/LogicalOr directly - they carry their own CCs
+    if let Expr::LogicalAnd(lhs, lhs_cc, rhs, rhs_cc) = expr {
+        return format!("{} && {}", 
+                stringify_condition(lhs, *lhs_cc, symbols),
+                stringify_condition(rhs, *rhs_cc, symbols));
+    }
+    if let Expr::LogicalOr(lhs, lhs_cc, rhs, rhs_cc) = expr {
+        return format!("{} || {}", 
+                stringify_condition(lhs, *lhs_cc, symbols),
+                stringify_condition(rhs, *rhs_cc, symbols));
+    }
+
     let (lhs, rhs) = match expr {
         Expr::Sub(l, r) => (Some(l), Some(r)),
         Expr::Add(l, r) => {
@@ -164,11 +208,7 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
             }
         },
         LinearStmt::Goto(cond, cc, target) => {
-             let target_str = if let Some(name) = symbols.get(target) {
-                 name.to_string()
-             } else {
-                 format!("global_{:04X}", target)
-             };
+             let target_str = format!("label_{:04X}", target);
              
              if *cc == 7 {
                  format!("{}goto {};", spaces, target_str)
@@ -181,19 +221,26 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
                  format!("{}if ({}) goto {};", spaces, cond_str, target_str)
              }
         },
-        LinearStmt::Call(expr) => {
+        LinearStmt::Call(expr, args) => {
+             let args_str = args.iter().map(|arg| stringify_expr(arg, symbols)).collect::<Vec<String>>().join(", ");
              if let Expr::Immediate(addr) = expr {
                  let addr_u16 = *addr as u16;
                   if let Some(name) = symbols.get(&addr_u16) {
-                      format!("{}call {}();", spaces, name)
+                      format!("{}{}({});", spaces, name, args_str)
                   } else {
-                      format!("{}call func_{:04X}();", spaces, addr_u16)
+                      format!("{}func_{:04X}({});", spaces, addr_u16, args_str)
                   }
              } else {
-                 format!("{}call {}();", spaces, stringify_expr(expr, symbols))
+                 format!("{}{}({});", spaces, stringify_expr(expr, symbols), args_str)
              }
         },
-        LinearStmt::Return => format!("{}return;", spaces),
+        LinearStmt::Return(val) => {
+            if let Some(v) = val {
+                format!("{}return {};", spaces, stringify_expr(v, symbols))
+            } else {
+                format!("{}return;", spaces)
+            }
+        },
         LinearStmt::Trap(v) => format!("{}trap(0x{:X});", spaces, v),
         LinearStmt::DoWhile(cond, cc, body) => {
              let mut s = format!("{}do {{\n", spaces);
@@ -257,23 +304,37 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
              s.push_str(&format!("{}}}", spaces));
              
              if let Some(false_stmts) = false_branch {
-                 s.push_str(" else {\n");
-                 for child in false_stmts {
-                     s.push_str(&stringify_stmt(child, symbols, indent + 1));
-                     s.push('\n');
+                 // Check if else branch is a single If statement - emit as "else if" instead of "else { if }"
+                 if false_stmts.len() == 1 {
+                     if let LinearStmt::If(_, _, _, _) = &false_stmts[0] {
+                         // Emit as "else if" without extra braces
+                         let else_if_str = stringify_stmt(&false_stmts[0], symbols, indent);
+                         // Remove leading spaces from the else-if since we're joining it inline
+                         let trimmed = else_if_str.trim_start();
+                         s.push_str(&format!(" else {}", trimmed));
+                     } else {
+                         s.push_str(" else {\n");
+                         for child in false_stmts {
+                             s.push_str(&stringify_stmt(child, symbols, indent + 1));
+                             s.push('\n');
+                         }
+                         s.push_str(&format!("{}}}", spaces));
+                     }
+                 } else {
+                     s.push_str(" else {\n");
+                     for child in false_stmts {
+                         s.push_str(&stringify_stmt(child, symbols, indent + 1));
+                         s.push('\n');
+                     }
+                     s.push_str(&format!("{}}}", spaces));
                  }
-                 s.push_str(&format!("{}}}", spaces));
              }
              s
         },
         LinearStmt::Break => format!("{}break;", spaces),
         LinearStmt::Continue => format!("{}continue;", spaces),
         LinearStmt::Label(addr) => {
-             if let Some(name) = symbols.get(addr) {
-                 format!("{}:", name)
-             } else {
-                 format!("global_{:04X}:", addr)
-             }
+             format!("label_{:04X}:", addr)
         },
     }
 }
