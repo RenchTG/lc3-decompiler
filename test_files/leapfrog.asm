@@ -1,12 +1,5 @@
-;;=============================================================
-;; CS 2110 - Spring 2025
-;; Homework 4 - Leapfrog
-;;=============================================================
-;; Name: Philip Dobranowski
-;;=============================================================
-
 .orig x3000
-;; Suggested Pseudocode (see PDF for explanation)
+;; Suggested Pseudocode
 ;;
 ;; inc = x0100
 ;; func_addr = starting address of function

@@ -5,7 +5,16 @@ use crate::ir::Expr;
 fn stringify_expr(expr: &Expr, symbols: &HashMap<u16, &str>) -> String {
     match expr {
         Expr::Register(r) => format!("var{}", r),
-        Expr::Immediate(val) => format!("{}", val),
+        Expr::Immediate(val) => {
+            // Check if this immediate is an address in the symbol table
+            let addr_u16 = *val as u16;
+            if let Some(name) = symbols.get(&addr_u16) {
+                if !(*name).starts_with("LC-3 OBJ FILE") {
+                    return name.to_string();
+                }
+            }
+            format!("{}", val)
+        },
 
         Expr::Add(lhs, rhs) => {
             // Check if rhs is a negative immediate - format as subtraction

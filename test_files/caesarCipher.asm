@@ -1,12 +1,3 @@
-;;=============================================================
-;; CS 2110 - Spring 2025
-;; Homework 4 - Caesar Cipher
-;;=============================================================
-;; Name: Philip Dobranowski
-;;=============================================================
-
-;;  In this file, you must implement the 'MOD' and 'ENCRYPT' subroutines.
-    
 .orig x3000
     ;; You do not need to write anything here
     LD R6, STACK_PTR

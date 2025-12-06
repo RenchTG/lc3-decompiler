@@ -1,12 +1,4 @@
-;;=============================================================
-;; CS 2110 - Spring 2025
-;; Homework 4 - Integer Square Root
-;;=============================================================
-;; Name: Philip Dobranowski
-;;=============================================================
-
-
-;; Suggested Pseudocode (see PDF for explanation)
+;; Suggested Pseudocode
 ;;
 ;;  int L = 0;
 ;;  int a = 1;

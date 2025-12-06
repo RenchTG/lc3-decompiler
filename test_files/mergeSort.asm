@@ -1,14 +1,4 @@
-;;=============================================================
-;; CS 2110 - Spring 2025
-;; Homework 4 - Merge Sort
-;;=============================================================
-;; Name: Philip Dobranowski
-;;=============================================================
-
-;;  In this file, you must implement the 'MERGESORT', 'MERGE', and 'DIVIDE' subroutines.
-    
 .orig x3000
-    ;; You do not need to write anything here
     LD R6, STACK_PTR
 
     ;; Pushes arguments (starting address of array to sort,

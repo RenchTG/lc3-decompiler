@@ -1,0 +1,74 @@
+LC-3 OBJ FILE
+
+.TEXT
+3000
+19
+5020
+E20B
+1240
+6440
+0406
+2606
+96FF
+5483
+7440
+1021
+0FF6
+F025
+0020
+0062
+0075
+0062
+0062
+0061
+0000
+
+.SYMBOL
+ADDR | EXT | LABEL
+3001 |   0 | LOOP
+300B |   0 | BREAK
+300C |   0 | MASK
+300D |   0 | STRING
+
+.LINKER_INFO
+
+.DEBUG
+# DEBUG SYMBOLS FOR LC3TOOLS
+
+LABEL  | INDEX
+LOOP   |   139
+BREAK  |   520
+MASK   |   532
+STRING |   547
+====================
+LINE | ADDR | SOURCE
+   0 | ???? | ; Make null-terminated string of letters uppercase\n
+   1 | ???? | \n
+   2 | ???? | ; R0 holds i\n
+   3 | ???? | ; R1 holds char_addr\n
+   4 | ???? | ; R2 holds char\n
+   5 | ???? | \n
+   6 | ???? | .orig x3000\n
+   7 | 3000 | and r0, r0, 0  ; i = 0\n
+   8 | ???? | \n
+   9 | ???? | LOOP           ; while (true)\n
+  10 | 3001 | lea r1, STRING ; r1 = address of string[0]\n
+  11 | 3002 | add r1, r1, r0 ; r1 = address of string[i] = char_addr\n
+  12 | 3003 | ldr r2, r1, 0  ; r2 = mem[char_addr]. Set cc for char\n
+  13 | 3004 | brz BREAK      ; if (char == 0) break\n
+  14 | 3005 | ld r3, MASK    ; r3 = 0x20\n
+  15 | 3006 | not r3, r3     ; r3 = ~0x20\n
+  16 | 3007 | and r2, r2, r3 ; char = char & ~0x20\n
+  17 | 3008 | str r2, r1, 0  ; mem[char_addr] = char\n
+  18 | 3009 | add r0, r0, 1  ; i++\n
+  19 | 300A | br LOOP\n
+  20 | ???? | \n
+  21 | ???? | BREAK\n
+  22 | 300B | halt\n
+  23 | ???? | \n
+  24 | 300C | MASK .fill x20\n
+  25 | 300D | STRING .stringz \"bubba\"\n
+  26 | ???? | ; ... If I run this program and look at these characters in memory, you\'ll\n
+  27 | ???? | ; notice they have changed to \"BUBBA\" instead! So it works.\n
+  28 | ???? | .end
+====================

@@ -95,81 +95,83 @@ ADDR | EXT | LABEL
 # DEBUG SYMBOLS FOR LC3TOOLS
 
 LABEL | INDEX
-LOOP  |    50
-NEXT  |   455
-END   |   584
-A     |   631
-B     |   643
-C     |   655
-D     |   667
-BUF   |   679
-MAX   |   695
+LOOP  |   126
+NEXT  |   531
+END   |   660
+A     |   707
+B     |   719
+C     |   731
+D     |   743
+BUF   |   755
+MAX   |   771
 ====================
 LINE | ADDR | SOURCE
-   0 | ???? | .orig x3000\n
-   1 | 3000 |     LD R0, BUF\n
-   2 | 3001 |     AND R3, R3, 0\n
-   3 | ???? | \n
-   4 | ???? |     LOOP\n
-   5 | 3002 |     LDR R1, R0, 0\n
-   6 | 3003 |     LD R2, A\n
-   7 | 3004 |     NOT R2, R2\n
-   8 | 3005 |     ADD R2, R2, 1\n
-   9 | 3006 |     ADD R1, R1, R2\n
-  10 | 3007 |     BRnp NEXT\n
-  11 | ???? |     \n
-  12 | 3008 |     ADD R0, R0, 1\n
-  13 | 3009 |     LDR R1, R0, 0\n
-  14 | 300A |     LD R2, B\n
-  15 | 300B |     NOT R2, R2\n
-  16 | 300C |     ADD R2, R2, 1\n
-  17 | 300D |     ADD R1, R1, R2\n
-  18 | 300E |     BRnp NEXT\n
-  19 | ???? |     \n
-  20 | 300F |     ADD R0, R0, 1\n
-  21 | 3010 |     LDR R1, R0, 0\n
-  22 | 3011 |     LD R2, C\n
-  23 | 3012 |     NOT R2, R2\n
-  24 | 3013 |     ADD R2, R2, 1\n
-  25 | 3014 |     ADD R1, R1, R2\n
-  26 | 3015 |     BRnp NEXT\n
-  27 | ???? |     \n
-  28 | 3016 |     LD R1, D\n
-  29 | 3017 |     STR R1, R0, 0\n
-  30 | 3018 |     ADD R3, R3, 1\n
-  31 | ???? |     \n
-  32 | ???? |     NEXT\n
-  33 | 3019 |     LD R1, MAX\n
-  34 | 301A |     NOT R1, R1\n
-  35 | 301B |     ADD R1, R1, 1\n
-  36 | 301C |     ADD R1, R0, R1\n
-  37 | 301D |     BRzp END\n
-  38 | ???? |     \n
-  39 | 301E |     ADD R0, R0, 1\n
-  40 | 301F |     BR LOOP\n
-  41 | ???? |     \n
-  42 | ???? |     END\n
-  43 | 3020 |     LD R0, MAX\n
-  44 | 3021 |     STR R3, R0, 0\n
-  45 | 3022 |     HALT\n
-  46 | ???? | \n
-  47 | 3023 | A .fill x41\n
-  48 | 3024 | B .fill x42\n
-  49 | 3025 | C .fill x43\n
-  50 | 3026 | D .fill x44\n
-  51 | 3027 | BUF .fill x4000\n
-  52 | 3028 | MAX .fill x401D\n
-  53 | ???? | .end\n
-  54 | ???? | \n
-  55 | ???? | .orig x4000\n
-  56 | 4000 |     .fill x1\n
-  57 | 4001 |     .fill x2\n
-  58 | 4002 |     .fill x3\n
-  59 | 4003 |     .fill x41\n
-  60 | 4004 |     .fill x42\n
-  61 | 4005 |     .fill x43\n
-  62 | 4006 |     .blkw 23\n
-  63 | 401D |     .fill x64\n
-  64 | ???? | .end\n
-  65 | ???? | 
+   0 | ???? | ;; This program was written to find instances of ABC and replace with ABCD\n
+   1 | ???? | \n
+   2 | ???? | .orig x3000\n
+   3 | 3000 |     LD R0, BUF\n
+   4 | 3001 |     AND R3, R3, 0\n
+   5 | ???? | \n
+   6 | ???? |     LOOP\n
+   7 | 3002 |     LDR R1, R0, 0\n
+   8 | 3003 |     LD R2, A\n
+   9 | 3004 |     NOT R2, R2\n
+  10 | 3005 |     ADD R2, R2, 1\n
+  11 | 3006 |     ADD R1, R1, R2\n
+  12 | 3007 |     BRnp NEXT\n
+  13 | ???? |     \n
+  14 | 3008 |     ADD R0, R0, 1\n
+  15 | 3009 |     LDR R1, R0, 0\n
+  16 | 300A |     LD R2, B\n
+  17 | 300B |     NOT R2, R2\n
+  18 | 300C |     ADD R2, R2, 1\n
+  19 | 300D |     ADD R1, R1, R2\n
+  20 | 300E |     BRnp NEXT\n
+  21 | ???? |     \n
+  22 | 300F |     ADD R0, R0, 1\n
+  23 | 3010 |     LDR R1, R0, 0\n
+  24 | 3011 |     LD R2, C\n
+  25 | 3012 |     NOT R2, R2\n
+  26 | 3013 |     ADD R2, R2, 1\n
+  27 | 3014 |     ADD R1, R1, R2\n
+  28 | 3015 |     BRnp NEXT\n
+  29 | ???? |     \n
+  30 | 3016 |     LD R1, D\n
+  31 | 3017 |     STR R1, R0, 0\n
+  32 | 3018 |     ADD R3, R3, 1\n
+  33 | ???? |     \n
+  34 | ???? |     NEXT\n
+  35 | 3019 |     LD R1, MAX\n
+  36 | 301A |     NOT R1, R1\n
+  37 | 301B |     ADD R1, R1, 1\n
+  38 | 301C |     ADD R1, R0, R1\n
+  39 | 301D |     BRzp END\n
+  40 | ???? |     \n
+  41 | 301E |     ADD R0, R0, 1\n
+  42 | 301F |     BR LOOP\n
+  43 | ???? |     \n
+  44 | ???? |     END\n
+  45 | 3020 |     LD R0, MAX\n
+  46 | 3021 |     STR R3, R0, 0\n
+  47 | 3022 |     HALT\n
+  48 | ???? | \n
+  49 | 3023 | A .fill x41\n
+  50 | 3024 | B .fill x42\n
+  51 | 3025 | C .fill x43\n
+  52 | 3026 | D .fill x44\n
+  53 | 3027 | BUF .fill x4000\n
+  54 | 3028 | MAX .fill x401D\n
+  55 | ???? | .end\n
+  56 | ???? | \n
+  57 | ???? | .orig x4000\n
+  58 | 4000 |     .fill x1\n
+  59 | 4001 |     .fill x2\n
+  60 | 4002 |     .fill x3\n
+  61 | 4003 |     .fill x41\n
+  62 | 4004 |     .fill x42\n
+  63 | 4005 |     .fill x43\n
+  64 | 4006 |     .blkw 23\n
+  65 | 401D |     .fill x64\n
+  66 | ???? | .end\n
+  67 | ???? | 
 ====================

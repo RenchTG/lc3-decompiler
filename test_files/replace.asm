@@ -1,3 +1,5 @@
+;; This program was written to find instances of ABC and replace with ABD
+
 .orig x3000
     LD R0, BUF
     AND R3, R3, 0

@@ -107,7 +107,8 @@ fn main() {
     };
 
     {
-        println!("Decompiling function at {:04X}", entry_addr);
+        println!("-- Decompiling function at {:04X} --", entry_addr);
+        println!();
         
         // Step 2. Split to basic blocks
         let mut blocks = create_basic_blocks(entry_addr, &disassembly);
