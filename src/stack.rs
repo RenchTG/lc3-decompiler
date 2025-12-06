@@ -226,14 +226,6 @@ pub fn process_callee(blocks: &mut HashMap<u16, Vec<IRStmt>>, entry_addr: u16) {
                     if let IRStmtKind::Store(_, v) = &mut stmt.kind { replace_params_in_expr(v); }
                 },
                 IRStmtKind::For(_init, Some(cond), _, _incr, _) => {
-                     // For init/incr are Stmts, they are handled recursively ideally or we assume simple.
-                     // But For body is separate. This iterator is only top-level for this block.
-                     // We need to recurse for nested structures?
-                     // My `process_callee` takes Vec<IRStmt> which are flat from `goto_blocks`.
-                     // `DoWhile`/`While` etc contain bodies.
-                     // Ah, `blocks` passed to `process_callee` are from `goto_blocks` which are somewhat structured?
-                     // No, `goto_blocks` are basic blocks (flat), BUT `control_flow` puts bodies *inside* `DoWhile` etc.
-                     // So we DO need to recurse.
                      replace_params_in_expr(cond);
                 }
                 _ => {}
@@ -408,9 +400,6 @@ fn process_caller_stmts(stmts: &mut Vec<IRStmt>) {
                              }
                         } else {
                              // Assignment to other register.
-                             // Allowed if it doesn't generally break stack assumptions.
-                             // We assume it's preparing the value for the *next* (actually previous in time) push?
-                             // Or the value for the *current* store which we just saw.
                              // Safe to skip.
                         }
                     } else {
@@ -418,41 +407,7 @@ fn process_caller_stmts(stmts: &mut Vec<IRStmt>) {
                     }
                 }
             }
-            // Args are in reverse order (last pushed is first arg? No, first pushed is last arg usually?)
-            // Standard C: Push Last ... Push First.
-            // Example stack frame: Param 1 at R5+4, Param 2 at R5+5.
-            // Caller pushes: Push Param 2, Push Param 1. 
-            // Stack grows down. 
-            // Push Param 2 (SP -= 1, *SP = P2)
-            // Push Param 1 (SP -= 1, *SP = P1). P1 is at new SP. P2 is at SP+1.
-            // Frame setup: FP = SP (roughly). 
-            // FP points to P1? No, usually FP points to saved FP stuff.
-            // Caller pushes params. JSR. Callee Pushes RetAddr, FP.
-            // So Param 1 is deeper in stack (higher address) than Param 2? 
-            // Docs say: Param 1 at R5+4, Param 2 at R5+5.
-            // Addresses increase. R5+4 < R5+5.
-            // So Param 2 is at higher address than Param 1?
-            // If stack grows down (addresses decrease).
-            // Pushing P2 then P1:
-            // SP_0
-            // SP_1 = SP_0 - 1. *SP_1 = P2. (Higher Addr)
-            // SP_2 = SP_1 - 1. *SP_2 = P1. (Lower Addr)
-            // So P2 is at SP+1. P1 is at SP.
-            // Callee: Pushes 5 things. R5 = SP_new.
-            // R5+4 should be P1.
-            // R5 points to ... 
-            // Let's check docs example.
-            // "put 26 as parameter" -> ADD R6, -1; STR 26, R6, 0.
-            // "put char+k as parameter" -> ADD R6, -1; STR char+k, R6, 0.
-            // JSR MOD
-            // So 26 pushed first, then char+k pushed second.
-            // 26 is at Higher Addr. char+k is at Lower Addr.
-            // If 26 is Param 2 and char+k is Param 1:
-            // Param 1 is Last Pushed.
-            // Backtracking finds Last Pushed first.
-            // So `args` vector contains [Param 1, Param 2].
-            // Correct.
-            
+
             // Check for return handling
             let mut ret_handling_indices = Vec::new();
             let mut ret_val_used = false;
@@ -462,15 +417,6 @@ fn process_caller_stmts(stmts: &mut Vec<IRStmt>) {
              if let IRStmtKind::Call(target, _) = &stmts[i].kind {
                  call_expr = Expr::Call(Box::new(target.clone()), args.clone());
              }
-            
-            // Look ahead for return value usage and stack cleanup
-            // Usage is usually at i+1 (LDR or use of R6)
-            // Cleanup (ADD R6) is at i+2 usually (after load), or i+1 if no load?
-            // If main uses RetVal, it MUST look at Top of Stack (R6).
-            
-            // Look ahead for return value usage and stack cleanup
-            // Due to expression propagation reordering, the return value load may not be
-            // immediately after the call. Search all subsequent statements for Load(R6).
             
             // First, search for any statement that uses Load(R6) - that's the return value
             let mut ret_val_idx = None;
