@@ -10,6 +10,7 @@ pub enum LinearStmt {
     Call(Expr, Vec<Expr>),
     Return(Option<Expr>),
     Trap(u8),
+    IndirectGoto(Expr),
     DoWhile(Option<Expr>, u8, Vec<LinearStmt>),
     While(Option<Expr>, u8, Vec<LinearStmt>),
     For(Box<LinearStmt>, Option<Expr>, u8, Box<LinearStmt>, Vec<LinearStmt>),
@@ -39,6 +40,7 @@ impl fmt::Debug for LinearStmt {
                 }
             },
             LinearStmt::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
+            LinearStmt::IndirectGoto(target) => write!(f, "IndirectGoto({:?})", target),
             LinearStmt::DoWhile(cond, cc, body) => {
                 write!(f, "DoWhile({:?}, 0x{:X}, {{", cond, cc)?;
                 for stmt in body {
@@ -121,6 +123,7 @@ fn to_linear_stmt(stmt: &IRStmt, targets: &HashSet<u16>) -> LinearStmt {
         IRStmtKind::Call(target, args) => LinearStmt::Call(target.clone(), args.clone()),
         IRStmtKind::Return(val) => LinearStmt::Return(val.clone()),
         IRStmtKind::Trap(v) => LinearStmt::Trap(*v),
+        IRStmtKind::IndirectGoto(target) => LinearStmt::IndirectGoto(target.clone()),
         IRStmtKind::DoWhile(cond, cc, body) => {
             LinearStmt::DoWhile(cond.clone(), *cc, linearize_blocks(body, targets))
         },

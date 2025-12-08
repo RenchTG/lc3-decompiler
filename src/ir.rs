@@ -60,6 +60,7 @@ pub enum IRStmtKind {
     Call(Expr, Vec<Expr>),  // Target, Arguments
     Return(Option<Expr>),   // RET, Optional Return Value
     Trap(u8),               // TRAP vector
+    IndirectGoto(Expr),     // Computed goto (JMP Rx where Rx != R7)
     DoWhile(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
     While(Option<Expr>, u8, HashMap<u16, Vec<IRStmt>>),
     For(Box<IRStmt>, Option<Expr>, u8, Box<IRStmt>, HashMap<u16, Vec<IRStmt>>),
@@ -88,6 +89,7 @@ impl fmt::Debug for IRStmtKind {
                 }
             },
             IRStmtKind::Trap(vect) => write!(f, "Trap(0x{:X})", vect),
+            IRStmtKind::IndirectGoto(target) => write!(f, "IndirectGoto({:?})", target),
             IRStmtKind::DoWhile(cond, cc, body) => {
                 write!(f, "DoWhile({:?}, 0x{:X}, {{", cond, cc)?;
                 let mut sorted_body: Vec<_> = body.iter().collect();
@@ -505,17 +507,17 @@ pub fn propagate_expressions(
                             });
                         },
                         AsmInstr::JMP(base) => {
-                             let _base_reg = base.reg_no();
+                             let base_reg = base.reg_no();
                              for reg in pending_order.drain(..) {
                                  if let Some((expr, stmt_addr)) = pending_assignments.remove(&reg) {
                                      ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(reg, expr) });
                                  }
                              }
 
-                             if base.reg_no() == 7 {
+                             if base_reg == 7 {
                                  ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Return(None) });
                              } else {
-                                 ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Trap(0xFF) });
+                                 ir_stmts.push(IRStmt { addr, kind: IRStmtKind::IndirectGoto(Expr::Register(base_reg)) });
                              }
                         },
                         AsmInstr::JSR(pcoffset11) => {
@@ -795,6 +797,7 @@ fn count_reg_uses_in_stmt(stmt: &IRStmt, reg: u8) -> usize {
         IRStmtKind::Return(Some(e)) => count_reg_uses_in_expr(e, reg),
         IRStmtKind::Return(None) => 0,
         IRStmtKind::Trap(_) | IRStmtKind::Break | IRStmtKind::Continue => 0,
+        IRStmtKind::IndirectGoto(target) => count_reg_uses_in_expr(target, reg),
         IRStmtKind::DoWhile(cond, _, body) | IRStmtKind::While(cond, _, body) => {
             let cond_uses = cond.as_ref().map_or(0, |c| count_reg_uses_in_expr(c, reg));
             cond_uses + body.values().flat_map(|s| s.iter()).map(|s| count_reg_uses_in_stmt(s, reg)).sum::<usize>()

@@ -251,6 +251,7 @@ fn stringify_stmt(stmt: &LinearStmt, symbols: &HashMap<u16, &str>, indent: usize
             }
         },
         LinearStmt::Trap(v) => format!("{}trap(0x{:X});", spaces, v),
+        LinearStmt::IndirectGoto(target) => format!("{}goto {};", spaces, stringify_expr(target, symbols)),
         LinearStmt::DoWhile(cond, cc, body) => {
              let mut s = format!("{}do {{\n", spaces);
              for child in body {
