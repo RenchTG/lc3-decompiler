@@ -163,6 +163,48 @@ pub fn propagate_expressions(
         let mut pending_assignments: HashMap<u8, (Expr, u16)> = HashMap::new();
         let mut pending_order: Vec<u8> = Vec::new();
 
+        // Helper: Get a pending assignment without flushing (for potential inlining)
+        // If the expr will be inlined, we don't need to flush predecessors
+        let get_pending = |target_reg: u8,
+                          pending_assignments: &mut HashMap<u8, (Expr, u16)>,
+                          pending_order: &mut Vec<u8>| -> Option<(Expr, u16)> {
+            if let Some((expr, addr)) = pending_assignments.remove(&target_reg) {
+                pending_order.retain(|&r| r != target_reg);
+                Some((expr, addr))
+            } else {
+                None
+            }
+        };
+        
+        // Helper: flush all pending assignments up to and including target_reg to maintain order
+        // Use this when we know we need to EMIT target_reg's assignment (not inline it)
+        let flush_and_emit = |target_reg: u8,
+                              expr: Expr,
+                              stmt_addr: u16,
+                              pending_assignments: &mut HashMap<u8, (Expr, u16)>,
+                              pending_order: &mut Vec<u8>,
+                              ir_stmts: &mut Vec<IRStmt>| {
+            // Flush all registers that come before target_reg in the original order
+            // Since target_reg is already removed from pending_order (by get_pending),
+            // we need to check by address: flush any pending with addr < stmt_addr
+            let mut to_flush = Vec::new();
+            for &reg in pending_order.iter() {
+                if let Some((_, pending_addr)) = pending_assignments.get(&reg) {
+                    if *pending_addr < stmt_addr {
+                        to_flush.push(reg);
+                    }
+                }
+            }
+            for reg in to_flush {
+                pending_order.retain(|&r| r != reg);
+                if let Some((expr, addr)) = pending_assignments.remove(&reg) {
+                    ir_stmts.push(IRStmt { addr, kind: IRStmtKind::Assign(reg, expr) });
+                }
+            }
+            // Now emit the target assignment
+            ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(target_reg, expr) });
+        };
+
         for i in 0..block.length {
             let addr = block_addr + i;
             if let Some(stmt) = disassembly.get(&addr) {
@@ -186,19 +228,18 @@ pub fn propagate_expressions(
                             }
                             
                             let op1 = if multi_use {
-                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
-                                    pending_order.retain(|&r| r != src1_reg);
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                // Multi-use: must emit and use register reference
+                                if let Some((expr, stmt_addr)) = get_pending(src1_reg, &mut pending_assignments, &mut pending_order) {
+                                    flush_and_emit(src1_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                 }
                                 Expr::Register(src1_reg)
                             } else {
-                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
-                                    pending_order.retain(|&r| r != src1_reg);
+                                if let Some((expr, stmt_addr)) = get_pending(src1_reg, &mut pending_assignments, &mut pending_order) {
                                     let killed = (liveness.defs & (1 << src1_reg)) != 0;
                                     if killed || (liveness.live_out & (1 << src1_reg)) == 0 {
-                                        expr
+                                        expr // Inline - no flush needed
                                     } else {
-                                        ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                        flush_and_emit(src1_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                         Expr::Register(src1_reg)
                                     }
                                 } else { Expr::Register(src1_reg) }
@@ -207,13 +248,12 @@ pub fn propagate_expressions(
                             let op2 = match src2 {
                                 ImmOrReg::Reg(r) => {
                                     let r_reg = r.reg_no();
-                                    if let Some((expr, stmt_addr)) = pending_assignments.remove(&r_reg) {
-                                        pending_order.retain(|&r| r != r_reg);
+                                    if let Some((expr, stmt_addr)) = get_pending(r_reg, &mut pending_assignments, &mut pending_order) {
                                         let killed = (liveness.defs & (1 << r_reg)) != 0;
                                         if killed || (liveness.live_out & (1 << r_reg)) == 0 {
-                                            expr
+                                            expr // Inline - no flush needed
                                         } else {
-                                            ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(r_reg, expr) });
+                                            flush_and_emit(r_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                             Expr::Register(r_reg)
                                         }
                                     } else { Expr::Register(r_reg) }
@@ -244,19 +284,18 @@ pub fn propagate_expressions(
                             }
                             
                             let op1 = if multi_use {
-                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
-                                    pending_order.retain(|&r| r != src1_reg);
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                // Multi-use: must emit and use register reference
+                                if let Some((expr, stmt_addr)) = get_pending(src1_reg, &mut pending_assignments, &mut pending_order) {
+                                    flush_and_emit(src1_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                 }
                                 Expr::Register(src1_reg)
                             } else {
-                                if let Some((expr, stmt_addr)) = pending_assignments.remove(&src1_reg) {
-                                    pending_order.retain(|&r| r != src1_reg);
+                                if let Some((expr, stmt_addr)) = get_pending(src1_reg, &mut pending_assignments, &mut pending_order) {
                                     let killed = (liveness.defs & (1 << src1_reg)) != 0;
                                     if killed || (liveness.live_out & (1 << src1_reg)) == 0 {
-                                        expr
+                                        expr // Inline - no flush needed
                                     } else {
-                                        ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src1_reg, expr) });
+                                        flush_and_emit(src1_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                         Expr::Register(src1_reg)
                                     }
                                 } else { Expr::Register(src1_reg) }
@@ -265,13 +304,12 @@ pub fn propagate_expressions(
                             let op2 = match src2 {
                                 ImmOrReg::Reg(r) => {
                                     let r_reg = r.reg_no();
-                                    if let Some((expr, stmt_addr)) = pending_assignments.remove(&r_reg) {
-                                        pending_order.retain(|&r| r != r_reg);
+                                    if let Some((expr, stmt_addr)) = get_pending(r_reg, &mut pending_assignments, &mut pending_order) {
                                         let killed = (liveness.defs & (1 << r_reg)) != 0;
                                         if killed || (liveness.live_out & (1 << r_reg)) == 0 {
-                                            expr
+                                            expr // Inline - no flush needed
                                         } else {
-                                            ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(r_reg, expr) });
+                                            flush_and_emit(r_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                             Expr::Register(r_reg)
                                         }
                                     } else { Expr::Register(r_reg) }
@@ -289,13 +327,12 @@ pub fn propagate_expressions(
                         AsmInstr::NOT(dst, src) => {
                             let dst_reg = dst.reg_no();
                             let src_reg = src.reg_no();
-                            let op1 = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
-                                pending_order.retain(|&r| r != src_reg);
+                            let op1 = if let Some((expr, stmt_addr)) = get_pending(src_reg, &mut pending_assignments, &mut pending_order) {
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
-                                    expr
+                                    expr // Inline - no flush needed
                                 } else {
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    flush_and_emit(src_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
@@ -338,13 +375,12 @@ pub fn propagate_expressions(
                         AsmInstr::LDR(dst, base, offset6) => {
                             let dst_reg = dst.reg_no();
                             let base_reg = base.reg_no();
-                            let base_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&base_reg) {
-                                pending_order.retain(|&r| r != base_reg);
+                            let base_op = if let Some((expr, stmt_addr)) = get_pending(base_reg, &mut pending_assignments, &mut pending_order) {
                                 let killed = (liveness.defs & (1 << base_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << base_reg)) == 0 {
-                                    expr
+                                    expr // Inline - no flush needed
                                 } else {
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(base_reg, expr) });
+                                    flush_and_emit(base_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                     Expr::Register(base_reg)
                                 }
                             } else { Expr::Register(base_reg) };
@@ -374,13 +410,12 @@ pub fn propagate_expressions(
                         },
                         AsmInstr::ST(src, pcoffset9) => {
                             let src_reg = src.reg_no();
-                            let src_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
-                                pending_order.retain(|&r| r != src_reg);
+                            let src_op = if let Some((expr, stmt_addr)) = get_pending(src_reg, &mut pending_assignments, &mut pending_order) {
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
-                                    expr
+                                    expr // Inline - no flush needed
                                 } else {
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    flush_and_emit(src_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
@@ -397,13 +432,12 @@ pub fn propagate_expressions(
                         },
                         AsmInstr::STI(src, pcoffset9) => {
                             let src_reg = src.reg_no();
-                            let src_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
-                                pending_order.retain(|&r| r != src_reg);
+                            let src_op = if let Some((expr, stmt_addr)) = get_pending(src_reg, &mut pending_assignments, &mut pending_order) {
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
-                                    expr
+                                    expr // Inline - no flush needed
                                 } else {
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    flush_and_emit(src_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
@@ -423,25 +457,23 @@ pub fn propagate_expressions(
                         },
                         AsmInstr::STR(src, base, offset6) => {
                             let src_reg = src.reg_no();
-                            let src_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&src_reg) {
-                                pending_order.retain(|&r| r != src_reg);
+                            let src_op = if let Some((expr, stmt_addr)) = get_pending(src_reg, &mut pending_assignments, &mut pending_order) {
                                 let killed = (liveness.defs & (1 << src_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << src_reg)) == 0 {
-                                    expr
+                                    expr // Inline - no flush needed
                                 } else {
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(src_reg, expr) });
+                                    flush_and_emit(src_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                     Expr::Register(src_reg)
                                 }
                             } else { Expr::Register(src_reg) };
 
                             let base_reg = base.reg_no();
-                            let base_op = if let Some((expr, stmt_addr)) = pending_assignments.remove(&base_reg) {
-                                pending_order.retain(|&r| r != base_reg);
+                            let base_op = if let Some((expr, stmt_addr)) = get_pending(base_reg, &mut pending_assignments, &mut pending_order) {
                                 let killed = (liveness.defs & (1 << base_reg)) != 0;
                                 if killed || (liveness.live_out & (1 << base_reg)) == 0 {
-                                    expr
+                                    expr // Inline - no flush needed
                                 } else {
-                                    ir_stmts.push(IRStmt { addr: stmt_addr, kind: IRStmtKind::Assign(base_reg, expr) });
+                                    flush_and_emit(base_reg, expr, stmt_addr, &mut pending_assignments, &mut pending_order, &mut ir_stmts);
                                     Expr::Register(base_reg)
                                 }
                             } else { Expr::Register(base_reg) };
