@@ -115,9 +115,11 @@ while (*(param0 + var0) != 0) {
 for (var1 = 0; var1 < var0; var1++) {
     var3 = *(param0 + var1);
     if (var3 >= *ASCIILOWERA && var3 <= *ASCIILOWERA + *ALPHABETLEN) {
-        var3 = MOD(var3 - *ASCIILOWERA + param1, *ALPHABETLEN) + *ASCIILOWERA;
+        var3 = var3 - *ASCIILOWERA;
+        var3 = MOD(var3 + param1, *ALPHABETLEN) + *ASCIILOWERA;
     } else if (var3 >= *ASCIIUPPERA && var3 <= *ASCIIUPPERA + *ALPHABETLEN) {
-        var3 = MOD(var3 - *ASCIIUPPERA + param1, *ALPHABETLEN) + *ASCIIUPPERA;
+        var3 = var3 - *ASCIIUPPERA;
+        var3 = MOD(var3 + param1, *ALPHABETLEN) + *ASCIIUPPERA;
     }
     *(param0 + var1) = var3;
 }
